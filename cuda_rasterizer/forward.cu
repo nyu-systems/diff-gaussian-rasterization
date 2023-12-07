@@ -194,6 +194,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float3 p_view;
 	if (!in_frustum(idx, orig_points, viewmatrix, projmatrix, prefiltered, p_view))
 		return;
+	// TODO: this is important; it will avoid considering many points that are not in the frustum.
 
 	// Transform point by projecting
 	float3 p_orig = { orig_points[3 * idx], orig_points[3 * idx + 1], orig_points[3 * idx + 2] };

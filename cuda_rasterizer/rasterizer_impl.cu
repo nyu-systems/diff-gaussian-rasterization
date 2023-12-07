@@ -98,7 +98,7 @@ __global__ void duplicateWithKeys(
 		// with this key yields Gaussian IDs in a list, such that they
 		// are first sorted by tile and then by depth. 
 		for (int y = rect_min.y; y < rect_max.y; y++)
-		{
+		{//TODO: this has a small problem when rect_min.y == rect_max.y; this is also a reasonable case.
 			for (int x = rect_min.x; x < rect_max.x; x++)
 			{
 				uint64_t key = y * grid.x + x;
@@ -221,9 +221,9 @@ int CudaRasterizer::Rasterizer::forward(
 	int* radii,
 	bool debug)
 {
-	static int iteration = 0;
 	int local_rank = get_env_var("LOCAL_RANK");
-	int world_size = get_env_var("WORLD_SIZE");	
+	int world_size = get_env_var("WORLD_SIZE");
+	int iteration = get_env_var("ITERATION");
 	if (world_size == 0)
 	{
 		world_size = 1;
@@ -332,7 +332,8 @@ int CudaRasterizer::Rasterizer::forward(
 			imgState.ranges);
 	CHECK_CUDA(, debug)
 
-	if (iteration % 1 == 0)
+	printf("world_size: %d iteration: %d\n", world_size, iteration);
+	if (iteration % 50 == 1)
 	{
 		int xl, xr;
 		int chunk_size = tile_grid.x / world_size;
@@ -346,6 +347,42 @@ int CudaRasterizer::Rasterizer::forward(
 		{
 			xl = chunk_size * local_rank + chunk_remain;
 			xr = chunk_size * (local_rank + 1) + chunk_remain;
+		}
+
+		if (world_size == 1)
+		{
+			// move radii, geomState.means2D back to cpu.
+			int* radii_cpu = new int[P];
+			CHECK_CUDA(cudaMemcpy(radii_cpu, radii, P * sizeof(int), cudaMemcpyDeviceToHost), debug);
+			float2* means2D_cpu = new float2[P];
+			CHECK_CUDA(cudaMemcpy(means2D_cpu, geomState.means2D, P * sizeof(float2), cudaMemcpyDeviceToHost), debug);
+
+			std::ofstream fout;
+			char* filename = new char[100];
+			log_folder = log_folder == nullptr ? "logs" : log_folder;
+			sprintf(filename, "%s/rectangle_iter=%d.txt", log_folder, iteration);
+			fout.open(filename, std::ios::app);
+			int number_rendered_tmp = 0;
+			for (int i = 0; i < P; i++) {
+				// save radii_cpu, means2D_cpu to file.
+				uint2 rect_min, rect_max;
+				if (radii_cpu[i]>0) // if radii_cpu[i] is 0 which means (in_frustum == false), then do not consider it. 
+					getOriginalRect(means2D_cpu[i], radii_cpu[i], rect_min, rect_max, tile_grid);
+				else {
+					rect_min.x = 0;
+					rect_min.y = 0;
+					rect_max.x = 0;
+					rect_max.y = 0;
+				}
+				number_rendered_tmp += (rect_max.y - rect_min.y) * (rect_max.x - rect_min.x);
+				fout << means2D_cpu[i].x << " " << means2D_cpu[i].y << " " << radii_cpu[i] << " " << rect_min.x << " " << rect_min.y << " " << rect_max.x << " " << rect_max.y << "\n";
+			}
+			fout << "number of rendered: (1, new calculated) " << number_rendered_tmp << " (2, from cuda code) " << num_rendered << "\n";
+			// clean up
+			fout.close();
+			delete[] radii_cpu;
+			delete[] means2D_cpu;
+			delete[] filename;
 		}
 
 		// move to imgState.ranges to cpu
@@ -363,9 +400,13 @@ int CudaRasterizer::Rasterizer::forward(
 		// for (int i = 0; i < tile_grid.x * tile_grid.y; i++)
 		// {
 		// 	// output tile position and range
-		// 	outfile << i << ": (" << i % tile_grid.x << "," << i / tile_grid.x << "), (" << cpu_ranges[i].x << "," << cpu_ranges[i].y << ")\n";
+		// 	outfile << i << ": (" << i % tile_grid.x << "," << i / tile_grid.x << "), (x,y)=(" << cpu_ranges[i].x << "," << cpu_ranges[i].y << ")\n";
 		// }
-		iteration++;
+		// clean up
+		outfile << "\n";
+		outfile.close();
+		delete[] cpu_ranges;
+		delete[] filename;
 	}
 
 	// Let each tile blend its range of Gaussians independently in parallel

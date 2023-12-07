@@ -54,6 +54,15 @@ __forceinline__ __device__ float ndc2Pix(float v, int S)
 	return ((v + 1.0) * S - 1.0) * 0.5;
 }
 
+__forceinline__ __host__ void getOriginalRect(const float2 p, int max_radius, uint2& rect_min, uint2& rect_max, dim3 grid) {
+    rect_min = {
+        min(grid.x, max((int)0, (int)((p.x - max_radius) / BLOCK_X))),
+        min(grid.y, max((int)0, (int)((p.y - max_radius) / BLOCK_Y)))};
+    rect_max = {
+        min(grid.x, max((int)0, (int)((p.x + max_radius + BLOCK_X - 1) / BLOCK_X))),
+        min(grid.y, max((int)0, (int)((p.y + max_radius + BLOCK_Y - 1) / BLOCK_Y)))};
+}
+
 __forceinline__ __device__ void getRect(const float2 p, int max_radius, uint2& rect_min, uint2& rect_max, dim3 grid, int local_rank, int world_size)
 {
 	rect_min = {
