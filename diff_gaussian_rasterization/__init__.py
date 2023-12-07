@@ -18,6 +18,9 @@ def cpu_deep_copy_tuple(input_tuple):
     copied_tensors = [item.cpu().clone() if isinstance(item, torch.Tensor) else item for item in input_tuple]
     return tuple(copied_tensors)
 
+def get_local_pixel_rect(width, height):
+    return _C.local_pixel_rect(width, height)
+
 def rasterize_gaussians(
     means3D,
     means2D,

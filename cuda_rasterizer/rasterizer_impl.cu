@@ -75,7 +75,9 @@ __global__ void duplicateWithKeys(
 	uint64_t* gaussian_keys_unsorted,
 	uint32_t* gaussian_values_unsorted,
 	int* radii,
-	dim3 grid)
+	dim3 grid,
+	int local_rank,
+	int world_size)
 {
 	auto idx = cg::this_grid().thread_rank();
 	if (idx >= P)
@@ -88,7 +90,7 @@ __global__ void duplicateWithKeys(
 		uint32_t off = (idx == 0) ? 0 : offsets[idx - 1];
 		uint2 rect_min, rect_max;
 
-		getRect(points_xy[idx], radii[idx], rect_min, rect_max, grid);
+		getRect(points_xy[idx], radii[idx], rect_min, rect_max, grid, local_rank, world_size);
 
 		// For each tile that the bounding rect overlaps, emit a 
 		// key/value pair. The key is |  tile ID  |      depth      |,
@@ -219,6 +221,15 @@ int CudaRasterizer::Rasterizer::forward(
 	int* radii,
 	bool debug)
 {
+	static int iteration = 0;
+	int local_rank = get_env_var("LOCAL_RANK");
+	int world_size = get_env_var("WORLD_SIZE");	
+	if (world_size == 0)
+	{
+		world_size = 1;
+	}
+	const char* log_folder = getenv("LOG_FOLDER");
+
 	const float focal_y = height / (2.0f * tan_fovy);
 	const float focal_x = width / (2.0f * tan_fovx);
 
@@ -269,7 +280,9 @@ int CudaRasterizer::Rasterizer::forward(
 		geomState.conic_opacity,
 		tile_grid,
 		geomState.tiles_touched,
-		prefiltered
+		prefiltered,
+		local_rank,
+		world_size
 	), debug)
 
 	// Compute prefix sum over full list of touched tile counts by Gaussians
@@ -294,7 +307,9 @@ int CudaRasterizer::Rasterizer::forward(
 		binningState.point_list_keys_unsorted,
 		binningState.point_list_unsorted,
 		radii,
-		tile_grid)
+		tile_grid,
+		local_rank,
+		world_size)
 	CHECK_CUDA(, debug)
 
 	int bit = getHigherMsb(tile_grid.x * tile_grid.y);
@@ -316,6 +331,42 @@ int CudaRasterizer::Rasterizer::forward(
 			binningState.point_list_keys,
 			imgState.ranges);
 	CHECK_CUDA(, debug)
+
+	if (iteration % 1 == 0)
+	{
+		int xl, xr;
+		int chunk_size = tile_grid.x / world_size;
+		int chunk_remain = tile_grid.x % world_size;
+		if (local_rank < chunk_remain)
+		{
+			xl = chunk_size * local_rank + local_rank;
+			xr = chunk_size * (local_rank + 1) + local_rank + 1;
+		}
+		else
+		{
+			xl = chunk_size * local_rank + chunk_remain;
+			xr = chunk_size * (local_rank + 1) + chunk_remain;
+		}
+
+		// move to imgState.ranges to cpu
+		uint2* cpu_ranges = new uint2[tile_grid.x * tile_grid.y];
+		CHECK_CUDA(cudaMemcpy(cpu_ranges, imgState.ranges, tile_grid.x * tile_grid.y * sizeof(uint2), cudaMemcpyDeviceToHost), debug);
+
+		char* filename = new char[100];
+		log_folder = log_folder == nullptr ? "logs" : log_folder;
+		sprintf(filename, "%s/ws=%d_rk=%d.log", log_folder, world_size, local_rank);
+
+		std::ofstream outfile;
+		outfile.open(filename, std::ios_base::app);
+		outfile << "iteration: " << iteration << ", local_rank: " << local_rank << ", world_size: " << world_size << ", num_rendered: " << num_rendered << ", grid:(" << tile_grid.x << "," << tile_grid.y << "), local_x: (" << xl << "," << xr << "), \n";
+		// DEBUG: print out tile ranges
+		// for (int i = 0; i < tile_grid.x * tile_grid.y; i++)
+		// {
+		// 	// output tile position and range
+		// 	outfile << i << ": (" << i % tile_grid.x << "," << i / tile_grid.x << "), (" << cpu_ranges[i].x << "," << cpu_ranges[i].y << ")\n";
+		// }
+		iteration++;
+	}
 
 	// Let each tile blend its range of Gaussians independently in parallel
 	const float* feature_ptr = colors_precomp != nullptr ? colors_precomp : geomState.rgb;

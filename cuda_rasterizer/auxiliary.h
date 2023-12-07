@@ -14,6 +14,7 @@
 
 #include "config.h"
 #include "stdio.h"
+#include "stdlib.h"
 
 #define BLOCK_SIZE (BLOCK_X * BLOCK_Y)
 #define NUM_WARPS (BLOCK_SIZE/32)
@@ -38,12 +39,22 @@ __device__ const float SH_C3[] = {
 	-0.5900435899266435f
 };
 
+inline int get_env_var(const char* key)
+{
+	const char* env_var = getenv(key);
+    int param = 0;
+    if (env_var != nullptr) {
+        param = atoi(env_var);
+    }
+	return param;
+}
+
 __forceinline__ __device__ float ndc2Pix(float v, int S)
 {
 	return ((v + 1.0) * S - 1.0) * 0.5;
 }
 
-__forceinline__ __device__ void getRect(const float2 p, int max_radius, uint2& rect_min, uint2& rect_max, dim3 grid)
+__forceinline__ __device__ void getRect(const float2 p, int max_radius, uint2& rect_min, uint2& rect_max, dim3 grid, int local_rank, int world_size)
 {
 	rect_min = {
 		min(grid.x, max((int)0, (int)((p.x - max_radius) / BLOCK_X))),
@@ -53,6 +64,65 @@ __forceinline__ __device__ void getRect(const float2 p, int max_radius, uint2& r
 		min(grid.x, max((int)0, (int)((p.x + max_radius + BLOCK_X - 1) / BLOCK_X))),
 		min(grid.y, max((int)0, (int)((p.y + max_radius + BLOCK_Y - 1) / BLOCK_Y)))
 	};
+	// divide the grid into world_size parts, and each process deals with one of them
+	int xl, xr;
+	int chunk_size = grid.x / world_size;
+	int chunk_remain = grid.x % world_size;
+	if (local_rank < chunk_remain)
+	{
+		xl = chunk_size * local_rank + local_rank;
+		xr = chunk_size * (local_rank + 1) + local_rank + 1;
+	}
+	else
+	{
+		xl = chunk_size * local_rank + chunk_remain;
+		xr = chunk_size * (local_rank + 1) + chunk_remain;
+	}
+	// TODO: (1) check correctness for this part.  (2) check whether this part can be optimized
+	// (3) refactor this code. 
+
+	// [rect_min.x, rect_max.x) intersects [xl, xr)
+	if (rect_min.x < xr && xl < rect_max.x) {
+		rect_min.x = max(rect_min.x, xl);
+		rect_max.x = min(rect_max.x, xr);
+	} else {
+		rect_min.x = rect_max.x = 0;
+		rect_min.y = rect_max.y = 0;
+	}
+}
+
+// TODO: check the correctness of this function; it has not been used yet.
+__forceinline__ __host__ __device__ void getLocalTileRect(uint2& rect_min, uint2& rect_max, dim3 grid, int local_rank, int world_size)
+{
+	int xl, xr;
+	int chunk_size = grid.x / world_size;
+	int chunk_remain = grid.x % world_size;
+	if (local_rank < chunk_remain)
+	{
+		xl = chunk_size * local_rank + local_rank;
+		xr = chunk_size * (local_rank + 1) + local_rank + 1;
+	}
+	else
+	{
+		xl = chunk_size * local_rank + chunk_remain;
+		xr = chunk_size * (local_rank + 1) + chunk_remain;
+	}
+
+	rect_min.x = xl;
+	rect_max.x = xr;
+	rect_min.y = 0;
+	rect_max.y = grid.y;
+}
+
+// TODO: check the correctness of this function; it has not been used yet.
+__forceinline__ __host__ __device__ void getLocalPixelRect(uint2& local_pixel_rect_min, uint2& local_pixel_rect_max, uint image_width, uint image_height, dim3 grid, int local_rank, int world_size)
+{
+	uint2 local_tile_rect_min, local_tile_rect_max;
+	getLocalTileRect(local_tile_rect_min, local_tile_rect_max, grid, local_rank, world_size);
+	local_pixel_rect_min.x = local_tile_rect_min.x * BLOCK_X;
+	local_pixel_rect_min.y = local_tile_rect_min.y * BLOCK_Y;
+	local_pixel_rect_max.x = min(image_width, local_tile_rect_max.x * BLOCK_X);
+	local_pixel_rect_max.y = min(image_height, local_tile_rect_max.y * BLOCK_Y);
 }
 
 __forceinline__ __device__ float3 transformPoint4x3(const float3& p, const float* matrix)

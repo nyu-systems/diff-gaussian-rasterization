@@ -65,3 +65,5 @@ torch::Tensor markVisible(
 		torch::Tensor& means3D,
 		torch::Tensor& viewmatrix,
 		torch::Tensor& projmatrix);
+
+std::tuple<int, int, int, int> localPixelRect(int image_width, int image_height);

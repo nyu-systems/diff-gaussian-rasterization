@@ -20,6 +20,7 @@
 #include <memory>
 #include "cuda_rasterizer/config.h"
 #include "cuda_rasterizer/rasterizer.h"
+#include "cuda_rasterizer/auxiliary.h"
 #include <fstream>
 #include <string>
 #include <functional>
@@ -214,4 +215,38 @@ torch::Tensor markVisible(
   }
   
   return present;
+}
+
+std::tuple<int, int, int, int> localPixelRect(int image_width, int image_height)
+{
+	int local_rank = get_env_var("LOCAL_RANK");
+	int world_size = get_env_var("WORLD_SIZE");
+	// const char* log_folder = getenv("LOG_FOLDER");
+	if (world_size == 0)
+	{
+		world_size = 1;
+	}
+
+	int grid_x = (image_width + BLOCK_X - 1) / BLOCK_X, grid_y = (image_height + BLOCK_Y - 1) / BLOCK_Y;
+
+	int xl, xr;
+	int chunk_size = grid_x / world_size;
+	int chunk_remain = grid_x % world_size;
+	if (local_rank < chunk_remain)
+	{
+		xl = chunk_size * local_rank + local_rank;
+		xr = chunk_size * (local_rank + 1) + local_rank + 1;
+	}
+	else
+	{
+		xl = chunk_size * local_rank + chunk_remain;
+		xr = chunk_size * (local_rank + 1) + chunk_remain;
+	}
+
+	int local_pixel_rect_min_x = min(image_width, xl * BLOCK_X);
+	int local_pixel_rect_max_x = min(image_width, xr * BLOCK_X);
+	int local_pixel_rect_min_y = 0;
+	int local_pixel_rect_max_y = image_height;
+
+	return std::make_tuple(local_pixel_rect_min_x, local_pixel_rect_max_x, local_pixel_rect_min_y, local_pixel_rect_max_y);
 }
