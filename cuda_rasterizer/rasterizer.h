@@ -32,6 +32,7 @@ namespace CudaRasterizer
 			std::function<char* (size_t)> geometryBuffer,
 			std::function<char* (size_t)> binningBuffer,
 			std::function<char* (size_t)> imageBuffer,
+			std::function<char* (size_t)> distBuffer,
 			const int P, int D, int M,
 			const float* background,
 			const int width, int height,

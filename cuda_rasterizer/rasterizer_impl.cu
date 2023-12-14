@@ -10,10 +10,13 @@
  */
 
 #include "rasterizer_impl.h"
+#include "my_timer.cu"
 #include <iostream>
 #include <fstream>
 #include <algorithm>
 #include <numeric>
+#include <string>
+#include <chrono>
 #include <cuda.h>
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
@@ -75,6 +78,7 @@ __global__ void duplicateWithKeys(
 	uint64_t* gaussian_keys_unsorted,
 	uint32_t* gaussian_values_unsorted,
 	int* radii,
+	bool* compute_locally,
 	dim3 grid,
 	int local_rank,
 	int world_size)
@@ -90,7 +94,7 @@ __global__ void duplicateWithKeys(
 		uint32_t off = (idx == 0) ? 0 : offsets[idx - 1];
 		uint2 rect_min, rect_max;
 
-		getRect(points_xy[idx], radii[idx], rect_min, rect_max, grid, local_rank, world_size);
+		getRect(points_xy[idx], radii[idx], rect_min, rect_max, grid);
 
 		// For each tile that the bounding rect overlaps, emit a 
 		// key/value pair. The key is |  tile ID  |      depth      |,
@@ -100,6 +104,7 @@ __global__ void duplicateWithKeys(
 		for (int y = rect_min.y; y < rect_max.y; y++)
 		{//TODO: this has a small problem when rect_min.y == rect_max.y; this is also a reasonable case.
 			for (int x = rect_min.x; x < rect_max.x; x++)
+			if (compute_locally[y * grid.x + x])
 			{
 				uint64_t key = y * grid.x + x;
 				key <<= 32;
@@ -166,6 +171,7 @@ CudaRasterizer::GeometryState CudaRasterizer::GeometryState::fromChunk(char*& ch
 	obtain(chunk, geom.rgb, P * 3, 128);
 	obtain(chunk, geom.tiles_touched, P, 128);
 	cub::DeviceScan::InclusiveSum(nullptr, geom.scan_size, geom.tiles_touched, geom.tiles_touched, P);
+	// no work is done and the required allocation size is returned in geom.scan_size.
 	obtain(chunk, geom.scanning_space, geom.scan_size, 128);
 	obtain(chunk, geom.point_offsets, P, 128);
 	return geom;
@@ -190,9 +196,203 @@ CudaRasterizer::BinningState CudaRasterizer::BinningState::fromChunk(char*& chun
 	cub::DeviceRadixSort::SortPairs(
 		nullptr, binning.sorting_size,
 		binning.point_list_keys_unsorted, binning.point_list_keys,
-		binning.point_list_unsorted, binning.point_list, P);
+		binning.point_list_unsorted, binning.point_list, P);//TODO: why do we need to sort here? so weird. 
 	obtain(chunk, binning.list_sorting_space, binning.sorting_size, 128);
 	return binning;
+}
+
+CudaRasterizer::DistributedState CudaRasterizer::DistributedState::fromChunk(char*& chunk, size_t tile_num)
+{
+	DistributedState dist;
+	obtain(chunk, dist.gs_on_tiles, tile_num, 128);
+	obtain(chunk, dist.gs_on_tiles_offsets, tile_num, 128);
+	cub::DeviceScan::InclusiveSum(nullptr, dist.scan_size, dist.gs_on_tiles, dist.gs_on_tiles_offsets, tile_num);
+	obtain(chunk, dist.scanning_space, dist.scan_size, 128);
+	obtain(chunk, dist.compute_locally, tile_num, 128);
+	return dist;
+}
+
+__global__ void getComputeLocally(//TODO: this function is not heavy enough to be parallelized.
+	const int tile_num,
+	uint32_t* gs_on_tiles_offsets,
+	bool* compute_locally,
+	int last_local_num_rendered_end,
+	int local_num_rendered_end
+) {
+	auto idx = cg::this_grid().thread_rank();
+	if (idx >= tile_num)
+		return;
+
+	uint32_t x = gs_on_tiles_offsets[idx];
+	if (x > last_local_num_rendered_end && x <= local_num_rendered_end)
+		compute_locally[idx] = true;
+	else
+		compute_locally[idx] = false;
+}
+
+__global__ void getComputeLocallyByTileNum(//TODO: this function is not heavy enough to be parallelized.
+	const int tile_num,
+	bool* compute_locally,
+	int last_local_num_rendered_end,
+	int local_num_rendered_end
+) {
+	auto idx = cg::this_grid().thread_rank();
+	if (idx >= tile_num)
+		return;
+
+	if (idx >= last_local_num_rendered_end && idx < local_num_rendered_end)
+		compute_locally[idx] = true;
+	else
+		compute_locally[idx] = false;
+}
+
+__global__ void updateTileTouched(//TODO: maybe this could take significant amount of time. 
+	const int P,
+	const dim3 tile_grid,
+	int* radii,
+	float2* means2D,
+	uint32_t* tiles_touched,
+	bool* compute_locally
+) {
+	auto idx = cg::this_grid().thread_rank();
+	if (idx >= P)
+		return;
+
+	uint32_t cnt = 0;
+	if (radii[idx] > 0)
+	{
+		uint2 rect_min, rect_max;
+		getRect(means2D[idx], radii[idx], rect_min, rect_max, tile_grid);
+		for (int y = rect_min.y; y < rect_max.y; y++)
+			for (int x = rect_min.x; x < rect_max.x; x++)
+			if (compute_locally[y * tile_grid.x + x])
+				cnt++;
+	}
+
+	tiles_touched[idx] = cnt;
+}
+
+__global__ void getGlobalGaussianOnTiles(
+	const int P,
+	const float2* means2D,
+	int* radii,
+	const dim3 tile_grid,
+	uint32_t* gs_on_tiles
+) {
+	auto idx = cg::this_grid().thread_rank();
+	if (idx >= P)
+		return;
+
+	if (radii[idx] > 0)
+	{
+		uint2 rect_min, rect_max;
+		getRect(means2D[idx], radii[idx], rect_min, rect_max, tile_grid);
+		for (int y = rect_min.y; y < rect_max.y; y++)
+			for (int x = rect_min.x; x < rect_max.x; x++)
+			{
+				atomicAdd(&gs_on_tiles[y * tile_grid.x + x], 1);
+				//TODO: Do I have to use atomicAdd? This is slow, honestly. 
+			}
+	}
+}
+
+void updateDistributedStatLocally(//TODO: optimize implementations for all these kernels. 
+	const int P,
+	const int width,
+	const int height,
+	const dim3 tile_grid,
+	int* radii,
+	float2* means2D,
+	uint32_t* tiles_touched,
+	CudaRasterizer::DistributedState& distState,
+	const int local_rank,
+	const int world_size,
+	MyTimer& timer
+){
+	timer.start("21 updateDistributedStatLocally.getGlobalGaussianOnTiles");
+	getGlobalGaussianOnTiles <<<(P + 255) / 256, 256 >>> (
+		P,
+		means2D,
+		radii,
+		tile_grid,
+		distState.gs_on_tiles
+	);
+	cudaDeviceSynchronize();
+	timer.stop("21 updateDistributedStatLocally.getGlobalGaussianOnTiles");
+
+	// getComputeLocally
+	if (world_size >= 1) {
+		int tile_num = tile_grid.x * tile_grid.y;
+		timer.start("22 updateDistributedStatLocally.InclusiveSum");
+		cub::DeviceScan::InclusiveSum(distState.scanning_space, distState.scan_size, distState.gs_on_tiles, distState.gs_on_tiles_offsets, tile_num);
+		cudaDeviceSynchronize();
+		timer.stop("22 updateDistributedStatLocally.InclusiveSum");
+
+		uint32_t num_rendered;
+		cudaMemcpy(&num_rendered, distState.gs_on_tiles_offsets + tile_num - 1, sizeof(uint32_t), cudaMemcpyDeviceToHost);
+
+		timer.start("23 updateDistributedStatLocally.getComputeLocally");
+		// find the position by binary search or customized kernal function?
+		const char * division_mode = "rendered_num";//TODO: change mode
+		if (division_mode == "rendered_num") {
+			uint32_t num_rendered_per_device = num_rendered / world_size + 1;
+			uint32_t last_local_num_rendered_end = num_rendered_per_device * local_rank;
+			uint32_t local_num_rendered_end = min(num_rendered_per_device * (local_rank + 1), num_rendered);
+			getComputeLocally <<<(tile_num + 255) / 256, 256 >>> (
+				tile_num,
+				distState.gs_on_tiles_offsets,
+				distState.compute_locally,
+				last_local_num_rendered_end,
+				local_num_rendered_end
+			);
+			distState.last_local_num_rendered_end = last_local_num_rendered_end;
+			distState.local_num_rendered_end = local_num_rendered_end;
+		} else if (division_mode == "tile_num") {
+			uint32_t num_tiles_per_device =	tile_num / world_size + 1;
+			uint32_t last_local_num_rendered_end = num_tiles_per_device * local_rank;
+			uint32_t local_num_rendered_end = min(num_tiles_per_device * (local_rank + 1), tile_num);
+			//TODO: optimze this; in some cases, it will not be divied evenly -> 2170 will be into 1086 and 1084
+			getComputeLocallyByTileNum <<<(tile_num + 255) / 256, 256 >>> (
+				tile_num,
+				distState.compute_locally,
+				last_local_num_rendered_end,
+				local_num_rendered_end
+			);
+			distState.last_local_num_rendered_end = last_local_num_rendered_end;
+			distState.local_num_rendered_end = local_num_rendered_end;
+		}
+		cudaDeviceSynchronize();
+		timer.stop("23 updateDistributedStatLocally.getComputeLocally");
+
+
+	}
+	else {
+		int tile_num = tile_grid.x * tile_grid.y;
+		cudaMemset(distState.compute_locally, true, tile_num * sizeof(bool));
+	}
+
+	timer.start("24 updateDistributedStatLocally.updateTileTouched");
+	// set tiles_touched[i] to 0 if compute_locally[i] is false.
+	updateTileTouched <<<(P + 255) / 256, 256 >>> (
+		P,
+		tile_grid,
+		radii,
+		means2D,
+		tiles_touched,
+		distState.compute_locally
+	);
+	cudaDeviceSynchronize();
+	timer.stop("24 updateDistributedStatLocally.updateTileTouched");
+}
+
+void save_log_in_file(int iteration, int local_rank, int world_size, const char* log_folder, const char* filename_prefix, const char* log_content) {
+	char* filename = new char[100];
+	sprintf(filename, "%s/%s_ws=%d_rk=%d.log", log_folder, filename_prefix, world_size, local_rank);
+	std::ofstream outfile;
+	outfile.open(filename, std::ios_base::app);
+	outfile << "iteration: " << iteration << ", " << log_content << "\n";
+	outfile.close();
+	delete[] filename;
 }
 
 // Forward rendering procedure for differentiable rasterization
@@ -201,6 +401,7 @@ int CudaRasterizer::Rasterizer::forward(
 	std::function<char* (size_t)> geometryBuffer,
 	std::function<char* (size_t)> binningBuffer,
 	std::function<char* (size_t)> imageBuffer,
+	std::function<char* (size_t)> distBuffer,
 	const int P, int D, int M,
 	const float* background,
 	const int width, int height,
@@ -223,12 +424,29 @@ int CudaRasterizer::Rasterizer::forward(
 {
 	int local_rank = get_env_var("LOCAL_RANK");
 	int world_size = get_env_var("WORLD_SIZE");
+	if (world_size == 0) world_size = 1;
 	int iteration = get_env_var("ITERATION");
-	if (world_size == 0)
-	{
-		world_size = 1;
-	}
+	int log_interval = get_env_var("LOG_INTERVAL");
 	const char* log_folder = getenv("LOG_FOLDER");
+	const char* zhx_debug_str = getenv("ZHX_DEBUG");
+	bool zhx_debug = false;
+	if (zhx_debug_str != nullptr && strcmp(zhx_debug_str, "true") == 0) zhx_debug = true;
+	const char* zhx_time_str = getenv("ZHX_TIME");
+	bool zhx_time = false;
+	if (zhx_time_str != nullptr && strcmp(zhx_time_str, "true") == 0) zhx_time = true;
+	char* log_tmp = new char[500];
+	// print out the environment variables
+	int device;
+	cudaError_t status = cudaGetDevice(&device);
+
+	if (iteration % log_interval == 1) {
+		// convert zhx_debug, zhx_time, device into one char string for output.
+		sprintf(log_tmp, "world_size: %d, local_rank: %d, iteration: %d, log_folder: %s, zhx_debug: %d, zhx_time: %d, device: %d", world_size, local_rank, iteration, log_folder, zhx_debug, zhx_time, device);
+		save_log_in_file(iteration, local_rank, world_size, log_folder, "cuda", log_tmp);
+	}
+
+	MyTimer timer;
+	timer.start("00 forward");
 
 	const float focal_y = height / (2.0f * tan_fovy);
 	const float focal_x = width / (2.0f * tan_fovx);
@@ -250,11 +468,7 @@ int CudaRasterizer::Rasterizer::forward(
 	char* img_chunkptr = imageBuffer(img_chunk_size);
 	ImageState imgState = ImageState::fromChunk(img_chunkptr, width * height);
 
-	if (NUM_CHANNELS != 3 && colors_precomp == nullptr)
-	{
-		throw std::runtime_error("For non-RGB, provide precomputed Gaussian colors!");
-	}
-
+	timer.start("10 preprocess");
 	// Run preprocessing per-Gaussian (transformation, bounding, conversion of SHs to RGB)
 	CHECK_CUDA(FORWARD::preprocess(
 		P, D, M,
@@ -284,10 +498,42 @@ int CudaRasterizer::Rasterizer::forward(
 		local_rank,
 		world_size
 	), debug)
+	cudaDeviceSynchronize();
+	timer.stop("10 preprocess");
 
+	size_t dist_chunk_size = required<DistributedState>(tile_grid.x * tile_grid.y);
+	char* dist_chunkptr = distBuffer(dist_chunk_size);
+	DistributedState distState = DistributedState::fromChunk(dist_chunkptr, tile_grid.x * tile_grid.y);
+	// Use geomState.means2D and radii to decide how to evenly distribute the workloads. 
+	timer.start("20 updateDistributedStatLocally");
+	if (world_size >= 1) {
+		updateDistributedStatLocally(
+			P,
+			width,
+			height,
+			tile_grid,
+			radii,
+			geomState.means2D,
+			geomState.tiles_touched,
+			distState,
+			local_rank,
+			world_size,
+			timer
+		);
+	} else {
+		int tile_num = tile_grid.x * tile_grid.y;
+		cudaMemset(distState.compute_locally, true, tile_num * sizeof(bool));
+	}
+	cudaDeviceSynchronize();
+	timer.stop("20 updateDistributedStatLocally");
+
+	// CHECK_CUDA(, debug)
 	// Compute prefix sum over full list of touched tile counts by Gaussians
 	// E.g., [2, 3, 0, 2, 1] -> [2, 5, 5, 7, 8]
+	timer.start("30 InclusiveSum");
 	CHECK_CUDA(cub::DeviceScan::InclusiveSum(geomState.scanning_space, geomState.scan_size, geomState.tiles_touched, geomState.point_offsets, P), debug)
+	cudaDeviceSynchronize();
+	timer.stop("30 InclusiveSum");
 
 	// Retrieve total number of Gaussian instances to launch and resize aux buffers
 	int num_rendered;
@@ -297,6 +543,7 @@ int CudaRasterizer::Rasterizer::forward(
 	char* binning_chunkptr = binningBuffer(binning_chunk_size);
 	BinningState binningState = BinningState::fromChunk(binning_chunkptr, num_rendered);
 
+	timer.start("40 duplicateWithKeys");
 	// For each instance to be rendered, produce adequate [ tile | depth ] key 
 	// and corresponding dublicated Gaussian indices to be sorted
 	duplicateWithKeys << <(P + 255) / 256, 256 >> > (
@@ -307,13 +554,17 @@ int CudaRasterizer::Rasterizer::forward(
 		binningState.point_list_keys_unsorted,
 		binningState.point_list_unsorted,
 		radii,
+		distState.compute_locally,
 		tile_grid,
 		local_rank,
 		world_size)
 	CHECK_CUDA(, debug)
+	cudaDeviceSynchronize();
+	timer.stop("40 duplicateWithKeys");
 
 	int bit = getHigherMsb(tile_grid.x * tile_grid.y);
 
+	timer.start("50 SortPairs");
 	// Sort complete list of (duplicated) Gaussian indices by keys
 	CHECK_CUDA(cub::DeviceRadixSort::SortPairs(
 		binningState.list_sorting_space,
@@ -322,8 +573,12 @@ int CudaRasterizer::Rasterizer::forward(
 		binningState.point_list_unsorted, binningState.point_list,
 		num_rendered, 0, 32 + bit), debug)
 
+	cudaDeviceSynchronize();
+	timer.stop("50 SortPairs");
+
 	CHECK_CUDA(cudaMemset(imgState.ranges, 0, tile_grid.x * tile_grid.y * sizeof(uint2)), debug);
 
+	timer.start("60 identifyTileRanges");
 	// Identify start and end of per-tile workloads in sorted list
 	if (num_rendered > 0)
 		identifyTileRanges << <(num_rendered + 255) / 256, 256 >> > (
@@ -331,24 +586,11 @@ int CudaRasterizer::Rasterizer::forward(
 			binningState.point_list_keys,
 			imgState.ranges);
 	CHECK_CUDA(, debug)
+	cudaDeviceSynchronize();
+	timer.stop("60 identifyTileRanges");
 
-	printf("world_size: %d iteration: %d\n", world_size, iteration);
-	if (iteration % 50 == 1)
+	if (iteration % log_interval == 1  && zhx_debug)
 	{
-		int xl, xr;
-		int chunk_size = tile_grid.x / world_size;
-		int chunk_remain = tile_grid.x % world_size;
-		if (local_rank < chunk_remain)
-		{
-			xl = chunk_size * local_rank + local_rank;
-			xr = chunk_size * (local_rank + 1) + local_rank + 1;
-		}
-		else
-		{
-			xl = chunk_size * local_rank + chunk_remain;
-			xr = chunk_size * (local_rank + 1) + chunk_remain;
-		}
-
 		if (world_size == 1)
 		{
 			// move radii, geomState.means2D back to cpu.
@@ -362,12 +604,13 @@ int CudaRasterizer::Rasterizer::forward(
 			log_folder = log_folder == nullptr ? "logs" : log_folder;
 			sprintf(filename, "%s/rectangle_iter=%d.txt", log_folder, iteration);
 			fout.open(filename, std::ios::app);
+
 			int number_rendered_tmp = 0;
 			for (int i = 0; i < P; i++) {
 				// save radii_cpu, means2D_cpu to file.
 				uint2 rect_min, rect_max;
 				if (radii_cpu[i]>0) // if radii_cpu[i] is 0 which means (in_frustum == false), then do not consider it. 
-					getOriginalRect(means2D_cpu[i], radii_cpu[i], rect_min, rect_max, tile_grid);
+					getRect(means2D_cpu[i], radii_cpu[i], rect_min, rect_max, tile_grid);
 				else {
 					rect_min.x = 0;
 					rect_min.y = 0;
@@ -389,29 +632,22 @@ int CudaRasterizer::Rasterizer::forward(
 		uint2* cpu_ranges = new uint2[tile_grid.x * tile_grid.y];
 		CHECK_CUDA(cudaMemcpy(cpu_ranges, imgState.ranges, tile_grid.x * tile_grid.y * sizeof(uint2), cudaMemcpyDeviceToHost), debug);
 
-		char* filename = new char[100];
-		log_folder = log_folder == nullptr ? "logs" : log_folder;
-		sprintf(filename, "%s/ws=%d_rk=%d.log", log_folder, world_size, local_rank);
+		sprintf(log_tmp, "iteration: %d, local_rank: %d, world_size: %d, num_rendered: %d, grid: (%d, %d)", iteration, local_rank, world_size, num_rendered, tile_grid.x, tile_grid.y);
+		save_log_in_file(iteration, local_rank, world_size, log_folder, "ranges", log_tmp);
 
-		std::ofstream outfile;
-		outfile.open(filename, std::ios_base::app);
-		outfile << "iteration: " << iteration << ", local_rank: " << local_rank << ", world_size: " << world_size << ", num_rendered: " << num_rendered << ", grid:(" << tile_grid.x << "," << tile_grid.y << "), local_x: (" << xl << "," << xr << "), \n";
 		// DEBUG: print out tile ranges
 		// for (int i = 0; i < tile_grid.x * tile_grid.y; i++)
 		// {
 		// 	// output tile position and range
 		// 	outfile << i << ": (" << i % tile_grid.x << "," << i / tile_grid.x << "), (x,y)=(" << cpu_ranges[i].x << "," << cpu_ranges[i].y << ")\n";
 		// }
-		// clean up
-		outfile << "\n";
-		outfile.close();
 		delete[] cpu_ranges;
-		delete[] filename;
 	}
 
 	// Let each tile blend its range of Gaussians independently in parallel
 	const float* feature_ptr = colors_precomp != nullptr ? colors_precomp : geomState.rgb;
-	CHECK_CUDA(FORWARD::render(
+	timer.start("70 render");
+	CHECK_CUDA(FORWARD::render(//TODO: only deal with local tiles. do not even load other tiles.
 		tile_grid, block,
 		imgState.ranges,
 		binningState.point_list,
@@ -423,7 +659,50 @@ int CudaRasterizer::Rasterizer::forward(
 		imgState.n_contrib,
 		background,
 		out_color), debug)
+	cudaDeviceSynchronize();
+	timer.stop("70 render");
 
+	cudaDeviceSynchronize();
+	timer.stop("00 forward");
+
+	// Print out timing information
+	if (zhx_time && iteration % log_interval == 1) {
+		timer.printAllTimes(iteration, world_size, local_rank, log_folder);
+
+		// move distState.last_local_num_rendered_end and distState.local_num_rendered_end to cpu
+		uint32_t last_local_num_rendered_end = distState.last_local_num_rendered_end;
+		uint32_t local_num_rendered_end = distState.local_num_rendered_end;
+		uint32_t* gs_on_tiles_cpu = new uint32_t[tile_grid.x * tile_grid.y];
+		CHECK_CUDA(cudaMemcpy(gs_on_tiles_cpu, distState.gs_on_tiles, tile_grid.x * tile_grid.y * sizeof(uint32_t), cudaMemcpyDeviceToHost), debug);
+
+		// distState.compute_locally to cpu
+		bool* compute_locally_cpu = new bool[tile_grid.x * tile_grid.y];
+		CHECK_CUDA(cudaMemcpy(compute_locally_cpu, distState.compute_locally, tile_grid.x * tile_grid.y * sizeof(bool), cudaMemcpyDeviceToHost), debug);
+
+		uint32_t num_local_tiles = 0;
+		uint32_t local_tiles_left_idx = 999999999;
+		uint32_t local_tiles_right_idx = 0;
+		uint32_t num_rendered_from_distState = 0;
+		for (int i = 0; i < tile_grid.x * tile_grid.y; i++)
+		{
+			if (compute_locally_cpu[i])
+			{
+				if (local_tiles_left_idx == 999999999)
+					local_tiles_left_idx = i;
+				local_tiles_right_idx = i;
+				num_local_tiles++;
+				num_rendered_from_distState += gs_on_tiles_cpu[i];
+			}
+		}
+
+		sprintf(log_tmp, "iteration: %d, num_local_tiles: %d, local_tiles_left_idx: %d, local_tiles_right_idx: %d, last_local_num_rendered_end: %d, local_num_rendered_end: %d, num_rendered: %d, num_rendered_from_distState: %d", iteration, num_local_tiles, local_tiles_left_idx, local_tiles_right_idx, last_local_num_rendered_end, local_num_rendered_end, num_rendered, num_rendered_from_distState);
+		save_log_in_file(iteration, local_rank, world_size, log_folder, "num_rendered", log_tmp);
+
+		delete[] compute_locally_cpu;
+		delete[] gs_on_tiles_cpu;
+	}
+
+	delete[] log_tmp;
 	return num_rendered;
 }
 
@@ -460,6 +739,22 @@ void CudaRasterizer::Rasterizer::backward(
 	float* dL_drot,
 	bool debug)
 {
+	int local_rank = get_env_var("LOCAL_RANK");
+	int world_size = get_env_var("WORLD_SIZE");
+	if (world_size == 0) world_size = 1;
+	int iteration = get_env_var("ITERATION");
+	const char* log_folder = getenv("LOG_FOLDER");
+	int log_interval = get_env_var("LOG_INTERVAL");
+	const char* zhx_debug_str = getenv("ZHX_DEBUG");
+	bool zhx_debug = false;
+	if (zhx_debug_str != nullptr && strcmp(zhx_debug_str, "true") == 0) zhx_debug = true;
+	const char* zhx_time_str = getenv("ZHX_TIME");
+	bool zhx_time = false;
+	if (zhx_time_str != nullptr && strcmp(zhx_time_str, "true") == 0) zhx_time = true;
+
+	MyTimer timer;
+	timer.start("b00 backward");
+
 	GeometryState geomState = GeometryState::fromChunk(geom_buffer, P);
 	BinningState binningState = BinningState::fromChunk(binning_buffer, R);
 	ImageState imgState = ImageState::fromChunk(img_buffer, width * height);
@@ -479,6 +774,7 @@ void CudaRasterizer::Rasterizer::backward(
 	// opacity and RGB of Gaussians from per-pixel loss gradients.
 	// If we were given precomputed colors and not SHs, use them.
 	const float* color_ptr = (colors_precomp != nullptr) ? colors_precomp : geomState.rgb;
+	timer.start("b10 render");
 	CHECK_CUDA(BACKWARD::render(
 		tile_grid,
 		block,
@@ -496,11 +792,14 @@ void CudaRasterizer::Rasterizer::backward(
 		(float4*)dL_dconic,
 		dL_dopacity,
 		dL_dcolor), debug)
+	cudaDeviceSynchronize();
+	timer.stop("b10 render");
 
 	// Take care of the rest of preprocessing. Was the precomputed covariance
 	// given to us or a scales/rot pair? If precomputed, pass that. If not,
 	// use the one we computed ourselves.
 	const float* cov3D_ptr = (cov3D_precomp != nullptr) ? cov3D_precomp : geomState.cov3D;
+	timer.start("b20 preprocess");
 	CHECK_CUDA(BACKWARD::preprocess(P, D, M,
 		(float3*)means3D,
 		radii,
@@ -523,4 +822,14 @@ void CudaRasterizer::Rasterizer::backward(
 		dL_dsh,
 		(glm::vec3*)dL_dscale,
 		(glm::vec4*)dL_drot), debug)
+	cudaDeviceSynchronize();
+	timer.stop("b20 preprocess");
+
+	cudaDeviceSynchronize();
+	timer.stop("b00 backward");
+
+	// Print out timing information
+	if (zhx_time && iteration % log_interval == 1) {
+		timer.printAllTimes(iteration, world_size, local_rank, log_folder);
+	}
 }

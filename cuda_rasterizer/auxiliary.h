@@ -63,7 +63,7 @@ __forceinline__ __host__ void getOriginalRect(const float2 p, int max_radius, ui
         min(grid.y, max((int)0, (int)((p.y + max_radius + BLOCK_Y - 1) / BLOCK_Y)))};
 }
 
-__forceinline__ __device__ void getRect(const float2 p, int max_radius, uint2& rect_min, uint2& rect_max, dim3 grid, int local_rank, int world_size)
+__forceinline__ __host__ __device__ void getRect(const float2 p, int max_radius, uint2& rect_min, uint2& rect_max, dim3 grid)
 {
 	rect_min = {
 		min(grid.x, max((int)0, (int)((p.x - max_radius) / BLOCK_X))),
@@ -73,31 +73,6 @@ __forceinline__ __device__ void getRect(const float2 p, int max_radius, uint2& r
 		min(grid.x, max((int)0, (int)((p.x + max_radius + BLOCK_X - 1) / BLOCK_X))),
 		min(grid.y, max((int)0, (int)((p.y + max_radius + BLOCK_Y - 1) / BLOCK_Y)))
 	};
-	// divide the grid into world_size parts, and each process deals with one of them
-	int xl, xr;
-	int chunk_size = grid.x / world_size;
-	int chunk_remain = grid.x % world_size;
-	if (local_rank < chunk_remain)
-	{
-		xl = chunk_size * local_rank + local_rank;
-		xr = chunk_size * (local_rank + 1) + local_rank + 1;
-	}
-	else
-	{
-		xl = chunk_size * local_rank + chunk_remain;
-		xr = chunk_size * (local_rank + 1) + chunk_remain;
-	}
-	// TODO: (1) check correctness for this part.  (2) check whether this part can be optimized
-	// (3) refactor this code. 
-
-	// [rect_min.x, rect_max.x) intersects [xl, xr)
-	if (rect_min.x < xr && xl < rect_max.x) {
-		rect_min.x = max(rect_min.x, xl);
-		rect_max.x = min(rect_max.x, xr);
-	} else {
-		rect_min.x = rect_max.x = 0;
-		rect_min.y = rect_max.y = 0;
-	}
 }
 
 // TODO: check the correctness of this function; it has not been used yet.

@@ -64,6 +64,18 @@ namespace CudaRasterizer
 		static BinningState fromChunk(char*& chunk, size_t P);
 	};
 
+	struct DistributedState
+	{
+		int last_local_num_rendered_end, local_num_rendered_end;
+		size_t scan_size;
+		char* scanning_space;
+		uint32_t* gs_on_tiles;
+		uint32_t* gs_on_tiles_offsets;
+		bool* compute_locally;
+
+		static DistributedState fromChunk(char*& chunk, size_t tile_num);
+	};
+
 	template<typename T> 
 	size_t required(size_t P)
 	{
