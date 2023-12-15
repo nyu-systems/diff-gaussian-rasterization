@@ -209,6 +209,8 @@ CudaRasterizer::DistributedState CudaRasterizer::DistributedState::fromChunk(cha
 	cub::DeviceScan::InclusiveSum(nullptr, dist.scan_size, dist.gs_on_tiles, dist.gs_on_tiles_offsets, tile_num);
 	obtain(chunk, dist.scanning_space, dist.scan_size, 128);
 	obtain(chunk, dist.compute_locally, tile_num, 128);
+	obtain(chunk, dist.local_tile_ids, tile_num+1, 128);
+	obtain(chunk, dist.local_tile_num, 1, 128);
 	return dist;
 }
 
@@ -296,6 +298,23 @@ __global__ void getGlobalGaussianOnTiles(
 	}
 }
 
+__global__ void getLocalTilesIds(
+	const int tile_num,
+	bool* compute_locally,
+	int* local_tile_ids,
+	int* local_tile_num
+) {
+	auto idx = cg::this_grid().thread_rank();
+	if (idx >= tile_num)
+		return;
+
+	if (compute_locally[idx])
+	{
+		int local_tile_id = atomicAdd(local_tile_num, 1);
+		local_tile_ids[local_tile_id] = idx;
+	}
+}
+
 void updateDistributedStatLocally(//TODO: optimize implementations for all these kernels. 
 	const int P,
 	const int width,
@@ -310,6 +329,8 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 	// MyTimer& timer
 	MyTimerOnGPU& timer
 ){
+	int tile_num = tile_grid.x * tile_grid.y;
+
 	timer.start("21 updateDistributedStatLocally.getGlobalGaussianOnTiles");
 	getGlobalGaussianOnTiles <<<(P + 255) / 256, 256 >>> (
 		P,
@@ -322,7 +343,6 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 
 	// getComputeLocally
 	if (world_size >= 1) {
-		int tile_num = tile_grid.x * tile_grid.y;
 		timer.start("22 updateDistributedStatLocally.InclusiveSum");
 		cub::DeviceScan::InclusiveSum(distState.scanning_space, distState.scan_size, distState.gs_on_tiles, distState.gs_on_tiles_offsets, tile_num);
 		timer.stop("22 updateDistributedStatLocally.InclusiveSum");
@@ -361,15 +381,30 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 			distState.local_num_rendered_end = local_num_rendered_end;
 		}
 		timer.stop("23 updateDistributedStatLocally.getComputeLocally");
-
-
 	}
 	else {
-		int tile_num = tile_grid.x * tile_grid.y;
 		cudaMemset(distState.compute_locally, true, tile_num * sizeof(bool));
 	}
 
-	timer.start("24 updateDistributedStatLocally.updateTileTouched");
+	// get local tile ids
+	printf("begin getLocalTilesIds\n");
+	timer.start("24 updateDistributedStatLocally.getLocalTilesIds");
+	cudaMemset(distState.local_tile_num, 0, sizeof(int));// This is important.
+	cudaMemset(distState.local_tile_ids, 0, (tile_num + 1) * sizeof(int));
+	getLocalTilesIds <<<(tile_num + 255) / 256, 256 >>> (
+		tile_num,
+		distState.compute_locally,
+		distState.local_tile_ids,
+		distState.local_tile_num
+	);
+	timer.stop("24 updateDistributedStatLocally.getLocalTilesIds");
+	// int local_tile_num_cpu = 0;
+	// // move local_tile_num_gpu to cpu
+	// cudaDeviceSynchronize();
+	// cudaMemcpy(&local_tile_num_cpu, distState.local_tile_num, sizeof(int), cudaMemcpyDeviceToHost);
+	// printf("tile_num: %d local_tile_num_cpu: %d\n", tile_num, local_tile_num_cpu);
+
+	timer.start("25 updateDistributedStatLocally.updateTileTouched");
 	// set tiles_touched[i] to 0 if compute_locally[i] is false.
 	updateTileTouched <<<(P + 255) / 256, 256 >>> (
 		P,
@@ -379,7 +414,7 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 		tiles_touched,
 		distState.compute_locally
 	);
-	timer.stop("24 updateDistributedStatLocally.updateTileTouched");
+	timer.stop("25 updateDistributedStatLocally.updateTileTouched");
 }
 
 void save_log_in_file(int iteration, int local_rank, int world_size, const char* log_folder, const char* filename_prefix, const char* log_content) {

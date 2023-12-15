@@ -72,6 +72,8 @@ namespace CudaRasterizer
 		uint32_t* gs_on_tiles;
 		uint32_t* gs_on_tiles_offsets;
 		bool* compute_locally;
+		int* local_tile_num;
+		int* local_tile_ids;
 
 		static DistributedState fromChunk(char*& chunk, size_t tile_num);
 	};
