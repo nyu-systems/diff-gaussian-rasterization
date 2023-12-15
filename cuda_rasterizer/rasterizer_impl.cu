@@ -307,7 +307,8 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 	CudaRasterizer::DistributedState& distState,
 	const int local_rank,
 	const int world_size,
-	MyTimer& timer
+	// MyTimer& timer
+	MyTimerOnGPU& timer
 ){
 	timer.start("21 updateDistributedStatLocally.getGlobalGaussianOnTiles");
 	getGlobalGaussianOnTiles <<<(P + 255) / 256, 256 >>> (
@@ -317,7 +318,6 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 		tile_grid,
 		distState.gs_on_tiles
 	);
-	cudaDeviceSynchronize();
 	timer.stop("21 updateDistributedStatLocally.getGlobalGaussianOnTiles");
 
 	// getComputeLocally
@@ -325,7 +325,6 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 		int tile_num = tile_grid.x * tile_grid.y;
 		timer.start("22 updateDistributedStatLocally.InclusiveSum");
 		cub::DeviceScan::InclusiveSum(distState.scanning_space, distState.scan_size, distState.gs_on_tiles, distState.gs_on_tiles_offsets, tile_num);
-		cudaDeviceSynchronize();
 		timer.stop("22 updateDistributedStatLocally.InclusiveSum");
 
 		uint32_t num_rendered;
@@ -361,7 +360,6 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 			distState.last_local_num_rendered_end = last_local_num_rendered_end;
 			distState.local_num_rendered_end = local_num_rendered_end;
 		}
-		cudaDeviceSynchronize();
 		timer.stop("23 updateDistributedStatLocally.getComputeLocally");
 
 
@@ -381,7 +379,6 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 		tiles_touched,
 		distState.compute_locally
 	);
-	cudaDeviceSynchronize();
 	timer.stop("24 updateDistributedStatLocally.updateTileTouched");
 }
 
@@ -445,7 +442,8 @@ int CudaRasterizer::Rasterizer::forward(
 		save_log_in_file(iteration, local_rank, world_size, log_folder, "cuda", log_tmp);
 	}
 
-	MyTimer timer;
+	// MyTimer timer;
+	MyTimerOnGPU timer;//TODO: two types of timer.
 	timer.start("00 forward");
 
 	const float focal_y = height / (2.0f * tan_fovy);
@@ -498,7 +496,6 @@ int CudaRasterizer::Rasterizer::forward(
 		local_rank,
 		world_size
 	), debug)
-	cudaDeviceSynchronize();
 	timer.stop("10 preprocess");
 
 	size_t dist_chunk_size = required<DistributedState>(tile_grid.x * tile_grid.y);
@@ -524,7 +521,6 @@ int CudaRasterizer::Rasterizer::forward(
 		int tile_num = tile_grid.x * tile_grid.y;
 		cudaMemset(distState.compute_locally, true, tile_num * sizeof(bool));
 	}
-	cudaDeviceSynchronize();
 	timer.stop("20 updateDistributedStatLocally");
 
 	// CHECK_CUDA(, debug)
@@ -532,7 +528,6 @@ int CudaRasterizer::Rasterizer::forward(
 	// E.g., [2, 3, 0, 2, 1] -> [2, 5, 5, 7, 8]
 	timer.start("30 InclusiveSum");
 	CHECK_CUDA(cub::DeviceScan::InclusiveSum(geomState.scanning_space, geomState.scan_size, geomState.tiles_touched, geomState.point_offsets, P), debug)
-	cudaDeviceSynchronize();
 	timer.stop("30 InclusiveSum");
 
 	// Retrieve total number of Gaussian instances to launch and resize aux buffers
@@ -559,7 +554,6 @@ int CudaRasterizer::Rasterizer::forward(
 		local_rank,
 		world_size)
 	CHECK_CUDA(, debug)
-	cudaDeviceSynchronize();
 	timer.stop("40 duplicateWithKeys");
 
 	int bit = getHigherMsb(tile_grid.x * tile_grid.y);
@@ -572,8 +566,6 @@ int CudaRasterizer::Rasterizer::forward(
 		binningState.point_list_keys_unsorted, binningState.point_list_keys,
 		binningState.point_list_unsorted, binningState.point_list,
 		num_rendered, 0, 32 + bit), debug)
-
-	cudaDeviceSynchronize();
 	timer.stop("50 SortPairs");
 
 	CHECK_CUDA(cudaMemset(imgState.ranges, 0, tile_grid.x * tile_grid.y * sizeof(uint2)), debug);
@@ -586,7 +578,6 @@ int CudaRasterizer::Rasterizer::forward(
 			binningState.point_list_keys,
 			imgState.ranges);
 	CHECK_CUDA(, debug)
-	cudaDeviceSynchronize();
 	timer.stop("60 identifyTileRanges");
 
 	if (iteration % log_interval == 1  && zhx_debug)
@@ -659,10 +650,8 @@ int CudaRasterizer::Rasterizer::forward(
 		imgState.n_contrib,
 		background,
 		out_color), debug)
-	cudaDeviceSynchronize();
 	timer.stop("70 render");
 
-	cudaDeviceSynchronize();
 	timer.stop("00 forward");
 
 	// Print out timing information
@@ -752,7 +741,8 @@ void CudaRasterizer::Rasterizer::backward(
 	bool zhx_time = false;
 	if (zhx_time_str != nullptr && strcmp(zhx_time_str, "true") == 0) zhx_time = true;
 
-	MyTimer timer;
+	// MyTimer timer;
+	MyTimerOnGPU timer;//TODO: two types of timer.
 	timer.start("b00 backward");
 
 	GeometryState geomState = GeometryState::fromChunk(geom_buffer, P);
@@ -792,7 +782,6 @@ void CudaRasterizer::Rasterizer::backward(
 		(float4*)dL_dconic,
 		dL_dopacity,
 		dL_dcolor), debug)
-	cudaDeviceSynchronize();
 	timer.stop("b10 render");
 
 	// Take care of the rest of preprocessing. Was the precomputed covariance
@@ -822,10 +811,7 @@ void CudaRasterizer::Rasterizer::backward(
 		dL_dsh,
 		(glm::vec3*)dL_dscale,
 		(glm::vec4*)dL_drot), debug)
-	cudaDeviceSynchronize();
 	timer.stop("b20 preprocess");
-
-	cudaDeviceSynchronize();
 	timer.stop("b00 backward");
 
 	// Print out timing information
