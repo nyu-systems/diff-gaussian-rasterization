@@ -273,6 +273,7 @@ renderCUDA(
 	const float4* __restrict__ conic_opacity,
 	float* __restrict__ final_T,
 	uint32_t* __restrict__ n_contrib,
+	uint32_t* __restrict__ n_contrib2loss,
 	const float* __restrict__ bg_color,
 	float* __restrict__ out_color)
 {
@@ -304,6 +305,7 @@ renderCUDA(
 	float T = 1.0f;
 	uint32_t contributor = 0;
 	uint32_t last_contributor = 0;
+	uint32_t thread_n_contrib2loss = 0;
 	float C[CHANNELS] = { 0 };
 
 	// Iterate over batches until all done or range is complete
@@ -354,6 +356,8 @@ renderCUDA(
 				continue;
 			}
 
+			thread_n_contrib2loss++;
+
 			// Eq. (3) from 3D Gaussian splatting paper.
 			for (int ch = 0; ch < CHANNELS; ch++)
 				C[ch] += features[collected_id[j] * CHANNELS + ch] * alpha * T;
@@ -372,6 +376,7 @@ renderCUDA(
 	{
 		final_T[pix_id] = T;
 		n_contrib[pix_id] = last_contributor;
+		n_contrib2loss[pix_id] = thread_n_contrib2loss;
 		for (int ch = 0; ch < CHANNELS; ch++)
 			out_color[ch * H * W + pix_id] = C[ch] + T * bg_color[ch];
 	}
@@ -387,6 +392,7 @@ void FORWARD::render(
 	const float4* conic_opacity,
 	float* final_T,
 	uint32_t* n_contrib,
+	uint32_t* n_contrib2loss,
 	const float* bg_color,
 	float* out_color)
 {
@@ -399,6 +405,7 @@ void FORWARD::render(
 		conic_opacity,
 		final_T,
 		n_contrib,
+		n_contrib2loss,
 		bg_color,
 		out_color);
 }
