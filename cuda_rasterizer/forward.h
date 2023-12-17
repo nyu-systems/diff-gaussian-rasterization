@@ -49,9 +49,25 @@ namespace FORWARD
 		int local_rank,
 		int world_size);
 
-	// Main rasterization method.
+	// // Main rasterization method.
+	// void render(
+	// 	const dim3 grid, dim3 block,
+	// 	const uint2* ranges,
+	// 	const uint32_t* point_list,
+	// 	int W, int H,
+	// 	const float2* points_xy_image,
+	// 	const float* features,
+	// 	const float4* conic_opacity,
+	// 	float* final_T,
+	// 	uint32_t* n_contrib,
+	// 	const float* bg_color,
+	// 	float* out_color);
+	
+	// Main rasterization method another version.
 	void render(
 		const dim3 grid, dim3 block,
+		const int local_tile_num,
+		const int* local_tile_ids,
 		const uint2* ranges,
 		const uint32_t* point_list,
 		int W, int H,

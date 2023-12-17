@@ -265,6 +265,9 @@ __global__ void preprocessCUDA(int P, int D, int M,
 template <uint32_t CHANNELS>
 __global__ void __launch_bounds__(BLOCK_X * BLOCK_Y)
 renderCUDA(
+	const dim3 tile_grid,
+	const int local_tile_num,
+	const int* __restrict__ local_tile_ids,
 	const uint2* __restrict__ ranges,
 	const uint32_t* __restrict__ point_list,
 	int W, int H,
@@ -277,9 +280,15 @@ renderCUDA(
 	float* __restrict__ out_color)
 {
 	// Identify current tile and associated min/max pixel range.
+	// get the block idx; this block grid is 1D.
 	auto block = cg::this_thread_block();
+	uint32_t tile_id = local_tile_ids[block.group_index().x];
+	// get tile_x and tile_y from tile_id
+	uint32_t tile_x = tile_id % tile_grid.x;
+	uint32_t tile_y = tile_id / tile_grid.x;
+
 	uint32_t horizontal_blocks = (W + BLOCK_X - 1) / BLOCK_X;
-	uint2 pix_min = { block.group_index().x * BLOCK_X, block.group_index().y * BLOCK_Y };
+	uint2 pix_min = { tile_x * BLOCK_X, tile_y * BLOCK_Y };
 	uint2 pix_max = { min(pix_min.x + BLOCK_X, W), min(pix_min.y + BLOCK_Y , H) };
 	uint2 pix = { pix_min.x + block.thread_index().x, pix_min.y + block.thread_index().y };
 	uint32_t pix_id = W * pix.y + pix.x;
@@ -291,7 +300,7 @@ renderCUDA(
 	bool done = !inside;
 
 	// Load start/end range of IDs to process in bit sorted list.
-	uint2 range = ranges[block.group_index().y * horizontal_blocks + block.group_index().x];
+	uint2 range = ranges[tile_id];
 	const int rounds = ((range.y - range.x + BLOCK_SIZE - 1) / BLOCK_SIZE);
 	int toDo = range.y - range.x;
 
@@ -377,8 +386,36 @@ renderCUDA(
 	}
 }
 
+// void FORWARD::render(
+// 	const dim3 grid, dim3 block,
+// 	const uint2* ranges,
+// 	const uint32_t* point_list,
+// 	int W, int H,
+// 	const float2* means2D,
+// 	const float* colors,
+// 	const float4* conic_opacity,
+// 	float* final_T,
+// 	uint32_t* n_contrib,
+// 	const float* bg_color,
+// 	float* out_color)
+// {
+// 	renderCUDA<NUM_CHANNELS> << <grid, block >> > (
+// 		ranges,
+// 		point_list,
+// 		W, H,
+// 		means2D,
+// 		colors,
+// 		conic_opacity,
+// 		final_T,
+// 		n_contrib,
+// 		bg_color,
+// 		out_color);
+// }
+
 void FORWARD::render(
 	const dim3 grid, dim3 block,
+	const int local_tile_num,
+	const int* local_tile_ids,
 	const uint2* ranges,
 	const uint32_t* point_list,
 	int W, int H,
@@ -390,7 +427,10 @@ void FORWARD::render(
 	const float* bg_color,
 	float* out_color)
 {
-	renderCUDA<NUM_CHANNELS> << <grid, block >> > (
+	renderCUDA<NUM_CHANNELS> << < local_tile_num, block >> > (
+		grid,
+		local_tile_num,
+		local_tile_ids,
 		ranges,
 		point_list,
 		W, H,

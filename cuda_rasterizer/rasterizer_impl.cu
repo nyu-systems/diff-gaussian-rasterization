@@ -315,6 +315,17 @@ __global__ void getLocalTilesIds(
 	}
 }
 
+__global__ void setArrayI2I(
+	const int tile_num,
+	int* array
+) {
+	auto idx = cg::this_grid().thread_rank();
+	if (idx >= tile_num)
+		return;
+
+	array[idx] = idx;
+}
+
 void updateDistributedStatLocally(//TODO: optimize implementations for all these kernels. 
 	const int P,
 	const int width,
@@ -387,22 +398,42 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 	}
 
 	// get local tile ids
-	printf("begin getLocalTilesIds\n");
 	timer.start("24 updateDistributedStatLocally.getLocalTilesIds");
-	cudaMemset(distState.local_tile_num, 0, sizeof(int));// This is important.
-	cudaMemset(distState.local_tile_ids, 0, (tile_num + 1) * sizeof(int));
-	getLocalTilesIds <<<(tile_num + 255) / 256, 256 >>> (
+	
+	//implementation 1: the resulted local_tile_ids is not sorted.
+	// cudaMemset(distState.local_tile_num, 0, sizeof(int));// This is important.
+	// cudaMemset(distState.local_tile_ids, 0, (tile_num + 1) * sizeof(int));
+	// getLocalTilesIds <<<(tile_num + 255) / 256, 256 >>> (//TODO: this does not fully utilize the parallelism of blocks and threads.
+	// 	tile_num,
+	// 	distState.compute_locally,
+	// 	distState.local_tile_ids,
+	// 	distState.local_tile_num
+	// );
+
+	//implementation 2: the resulted local_tile_ids is sorted.
+	// Determine temporary device storage requirements
+	void     *d_temp_storage = NULL;
+	size_t   temp_storage_bytes = 0;
+	int *all_tile_ids = nullptr;
+	cudaMalloc(&all_tile_ids, tile_num * sizeof(int));
+	setArrayI2I <<<(tile_num + 255) / 256, 256 >>> (
 		tile_num,
-		distState.compute_locally,
-		distState.local_tile_ids,
-		distState.local_tile_num
+		all_tile_ids
 	);
+	cub::DeviceSelect::Flagged(d_temp_storage, temp_storage_bytes, all_tile_ids, distState.compute_locally, distState.local_tile_ids, distState.local_tile_num, tile_num);
+	cudaMalloc(&d_temp_storage, temp_storage_bytes);
+	cub::DeviceSelect::Flagged(d_temp_storage, temp_storage_bytes, all_tile_ids, distState.compute_locally, distState.local_tile_ids, distState.local_tile_num, tile_num);
 	timer.stop("24 updateDistributedStatLocally.getLocalTilesIds");
+	// move distState.local_tile_num and distState.local_tile_ids to cpu and output
+
+	// DEBUG: print out local_tile_num and local_tile_ids
 	// int local_tile_num_cpu = 0;
-	// // move local_tile_num_gpu to cpu
-	// cudaDeviceSynchronize();
 	// cudaMemcpy(&local_tile_num_cpu, distState.local_tile_num, sizeof(int), cudaMemcpyDeviceToHost);
-	// printf("tile_num: %d local_tile_num_cpu: %d\n", tile_num, local_tile_num_cpu);
+	// int* local_tile_ids_cpu = new int[tile_num + 1];//TODO: change tile_num + 1 to tile_num
+	// cudaMemcpy(local_tile_ids_cpu, distState.local_tile_ids, (tile_num + 1) * sizeof(int), cudaMemcpyDeviceToHost);
+	// printf("local_tile_num_cpu: %d, local_tile_ids_cpu: %d %d %d %d %d, local_tile_ids_cpu end: %d %d %d %d %d\n", local_tile_num_cpu, local_tile_ids_cpu[0], local_tile_ids_cpu[1], local_tile_ids_cpu[2], local_tile_ids_cpu[3], local_tile_ids_cpu[4], local_tile_ids_cpu[local_tile_num_cpu-1], local_tile_ids_cpu[local_tile_num_cpu - 2], local_tile_ids_cpu[local_tile_num_cpu - 3], local_tile_ids_cpu[local_tile_num_cpu - 4], local_tile_ids_cpu[local_tile_num_cpu - 5]);
+	// cudaFree(d_temp_storage);
+	// cudaFree(all_tile_ids);
 
 	timer.start("25 updateDistributedStatLocally.updateTileTouched");
 	// set tiles_touched[i] to 0 if compute_locally[i] is false.
@@ -670,11 +701,20 @@ int CudaRasterizer::Rasterizer::forward(
 		delete[] cpu_ranges;
 	}
 
+	int local_tile_num_cpu;
+	CHECK_CUDA(cudaMemcpy(&local_tile_num_cpu, distState.local_tile_num, sizeof(int), cudaMemcpyDeviceToHost), debug);
+	// int* local_tile_ids_cpu_10 = new int[10];
+	// CHECK_CUDA(cudaMemcpy(local_tile_ids_cpu_10, distState.local_tile_ids, 10 * sizeof(int), cudaMemcpyDeviceToHost), debug);
+	// printf("forward local_tile_num_cpu: %d, local_tile_ids_cpu_10: %d %d %d %d %d %d %d %d %d %d\n", local_tile_num_cpu, local_tile_ids_cpu_10[0], local_tile_ids_cpu_10[1], local_tile_ids_cpu_10[2], local_tile_ids_cpu_10[3], local_tile_ids_cpu_10[4], local_tile_ids_cpu_10[5], local_tile_ids_cpu_10[6], local_tile_ids_cpu_10[7], local_tile_ids_cpu_10[8], local_tile_ids_cpu_10[9]);
+	// delete[] local_tile_ids_cpu_10;
+
 	// Let each tile blend its range of Gaussians independently in parallel
 	const float* feature_ptr = colors_precomp != nullptr ? colors_precomp : geomState.rgb;
 	timer.start("70 render");
 	CHECK_CUDA(FORWARD::render(//TODO: only deal with local tiles. do not even load other tiles.
 		tile_grid, block,
+		local_tile_num_cpu,
+		distState.local_tile_ids,
 		imgState.ranges,
 		binningState.point_list,
 		width, height,
@@ -751,6 +791,7 @@ void CudaRasterizer::Rasterizer::backward(
 	char* geom_buffer,
 	char* binning_buffer,
 	char* img_buffer,
+	char* dist_buffer,
 	const float* dL_dpix,
 	float* dL_dmean2D,
 	float* dL_dconic,
@@ -795,6 +836,15 @@ void CudaRasterizer::Rasterizer::backward(
 	const dim3 tile_grid((width + BLOCK_X - 1) / BLOCK_X, (height + BLOCK_Y - 1) / BLOCK_Y, 1);
 	const dim3 block(BLOCK_X, BLOCK_Y, 1);
 
+
+	DistributedState distState = DistributedState::fromChunk(dist_buffer, tile_grid.x * tile_grid.y);
+	int local_tile_num_cpu;
+	cudaMemcpy(&local_tile_num_cpu, distState.local_tile_num, sizeof(int), cudaMemcpyDeviceToHost);
+	// int* local_tile_ids_cpu_10 = new int[10];
+	// cudaMemcpy(local_tile_ids_cpu_10, distState.local_tile_ids, 10 * sizeof(int), cudaMemcpyDeviceToHost);
+	// printf("backward local_tile_num_cpu: %d local_tile_ids_cpu_10: %d %d %d %d %d %d %d %d %d %d\n", local_tile_num_cpu, local_tile_ids_cpu_10[0], local_tile_ids_cpu_10[1], local_tile_ids_cpu_10[2], local_tile_ids_cpu_10[3], local_tile_ids_cpu_10[4], local_tile_ids_cpu_10[5], local_tile_ids_cpu_10[6], local_tile_ids_cpu_10[7], local_tile_ids_cpu_10[8], local_tile_ids_cpu_10[9]);
+	// delete[] local_tile_ids_cpu_10;
+
 	// Compute loss gradients w.r.t. 2D mean position, conic matrix,
 	// opacity and RGB of Gaussians from per-pixel loss gradients.
 	// If we were given precomputed colors and not SHs, use them.
@@ -803,6 +853,8 @@ void CudaRasterizer::Rasterizer::backward(
 	CHECK_CUDA(BACKWARD::render(
 		tile_grid,
 		block,
+		local_tile_num_cpu,
+		distState.local_tile_ids,
 		imgState.ranges,
 		binningState.point_list,
 		width, height,
