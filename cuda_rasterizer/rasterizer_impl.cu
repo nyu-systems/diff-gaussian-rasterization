@@ -580,7 +580,7 @@ int CudaRasterizer::Rasterizer::forward(
 	CHECK_CUDA(, debug)
 	timer.stop("60 identifyTileRanges");
 
-	if (iteration % log_interval == 1  && zhx_debug)
+	if (iteration % log_interval == 1  && false)
 	{
 		if (world_size == 1)
 		{
@@ -689,6 +689,49 @@ int CudaRasterizer::Rasterizer::forward(
 
 		delete[] compute_locally_cpu;
 		delete[] gs_on_tiles_cpu;
+	}
+
+	if (iteration % log_interval == 1  && zhx_debug)
+	{
+		// move to imgState.ranges to cpu
+		uint2* cpu_ranges = new uint2[tile_grid.x * tile_grid.y];
+		CHECK_CUDA(cudaMemcpy(cpu_ranges, imgState.ranges, tile_grid.x * tile_grid.y * sizeof(uint2), cudaMemcpyDeviceToHost), debug);
+		uint32_t* cpu_n_contrib = new uint32_t[width * height];
+		cudaMemcpy(cpu_n_contrib, imgState.n_contrib, width * height * sizeof(uint32_t), cudaMemcpyDeviceToHost);
+
+		float global_n_contrib = 0;
+		float global_n_contrib_ratio = 0;
+		int num_local_tiles = 0;
+		for (int i = 0; i < tile_grid.x * tile_grid.y; i++)
+		{
+			// output tile position and range
+			int tile_x = i % tile_grid.x;
+			int tile_y = i / tile_grid.x;
+			int2 pix_min = { tile_x * BLOCK_X, tile_y * BLOCK_Y };
+			int2 pix_max = { min(pix_min.x + BLOCK_X, width), min(pix_min.y + BLOCK_Y , height) };
+			int sum_n_contrib = 0;
+			for (int y = pix_min.y; y < pix_max.y; y++)
+				for (int x = pix_min.x; x < pix_max.x; x++)
+					sum_n_contrib += (int)cpu_n_contrib[y * width + x];
+			float ave_n_contrib = (float)sum_n_contrib / ((pix_max.y - pix_min.y) * (pix_max.x - pix_min.x));
+
+			float contrib_ratio = 0;
+			if (cpu_ranges[i].x < cpu_ranges[i].y)
+				contrib_ratio = ave_n_contrib / (cpu_ranges[i].y - cpu_ranges[i].x);
+
+			sprintf(log_tmp, "tile: (%d, %d), range: (%d, %d), local_num_rendered: %d, local_ave_n_contrib: %f, contrib_ratio: %f", tile_x, tile_y, (int)cpu_ranges[i].x, (int)cpu_ranges[i].y, (int)cpu_ranges[i].y-(int)cpu_ranges[i].x, ave_n_contrib, contrib_ratio);
+			save_log_in_file(iteration, local_rank, world_size, log_folder, "n_contrib", log_tmp);
+			global_n_contrib += ave_n_contrib;
+			global_n_contrib_ratio += contrib_ratio;
+			if (cpu_ranges[i].x < cpu_ranges[i].y) num_local_tiles++;
+		}
+		global_n_contrib = global_n_contrib / (float)num_local_tiles;
+		global_n_contrib_ratio = global_n_contrib_ratio / (float)num_local_tiles;
+		sprintf(log_tmp, "iteration: %d, local_rank: %d, world_size: %d, global_num_rendered: %d, global_ave_n_contrib: %f, contrib_ratio: %f", iteration, local_rank, world_size, num_rendered, global_n_contrib, global_n_contrib / num_rendered);
+		save_log_in_file(iteration, local_rank, world_size, log_folder, "n_contrib", log_tmp);
+
+		delete[] cpu_ranges;
+		delete[] cpu_n_contrib;
 	}
 
 	delete[] log_tmp;
