@@ -322,7 +322,7 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 	timer.stop("21 updateDistributedStatLocally.getGlobalGaussianOnTiles");
 
 	// getComputeLocally
-	if (world_size >= 1) {
+	if (world_size > 1) {//TODO: debug
 		int tile_num = tile_grid.x * tile_grid.y;
 		timer.start("22 updateDistributedStatLocally.InclusiveSum");
 		cub::DeviceScan::InclusiveSum(distState.scanning_space, distState.scan_size, distState.gs_on_tiles, distState.gs_on_tiles_offsets, tile_num);
@@ -367,6 +367,9 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 	}
 	else {
 		int tile_num = tile_grid.x * tile_grid.y;
+		cudaMemset(distState.compute_locally, false, tile_num * sizeof(bool));
+		tile_num = get_env_var("BENCH_TILE_NUM");
+		// printf("benchmark -> tile_num: %d\n", tile_num);
 		cudaMemset(distState.compute_locally, true, tile_num * sizeof(bool));
 	}
 
