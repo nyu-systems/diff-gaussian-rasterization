@@ -408,6 +408,7 @@ renderCUDA(
 	const float* __restrict__ colors,
 	const float* __restrict__ final_Ts,
 	const uint32_t* __restrict__ n_contrib,
+	const bool* __restrict__ compute_locally,
 	const float* __restrict__ dL_dpixels,
 	float3* __restrict__ dL_dmean2D,
 	float4* __restrict__ dL_dconic2D,
@@ -430,6 +431,9 @@ renderCUDA(
 
 	bool done = !inside;
 	int toDo = range.y - range.x;
+
+	if (!(compute_locally[block.group_index().y * horizontal_blocks + block.group_index().x] && inside))
+		return;
 
 	__shared__ int collected_id[BLOCK_SIZE];
 	__shared__ float2 collected_xy[BLOCK_SIZE];
@@ -632,6 +636,7 @@ void BACKWARD::render(
 	const float* colors,
 	const float* final_Ts,
 	const uint32_t* n_contrib,
+	const bool* compute_locally,
 	const float* dL_dpixels,
 	float3* dL_dmean2D,
 	float4* dL_dconic2D,
@@ -648,6 +653,7 @@ void BACKWARD::render(
 		colors,
 		final_Ts,
 		n_contrib,
+		compute_locally,
 		dL_dpixels,
 		dL_dmean2D,
 		dL_dconic2D,

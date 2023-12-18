@@ -274,6 +274,7 @@ renderCUDA(
 	float* __restrict__ final_T,
 	uint32_t* __restrict__ n_contrib,
 	uint32_t* __restrict__ n_contrib2loss,
+	bool* __restrict__ compute_locally,
 	const float* __restrict__ bg_color,
 	float* __restrict__ out_color)
 {
@@ -295,6 +296,16 @@ renderCUDA(
 	uint2 range = ranges[block.group_index().y * horizontal_blocks + block.group_index().x];
 	const int rounds = ((range.y - range.x + BLOCK_SIZE - 1) / BLOCK_SIZE);
 	int toDo = range.y - range.x;
+
+	// TODO: in some cornor cases, todo==0 does not mean it is not computed locally.
+	if (!compute_locally[block.group_index().y * horizontal_blocks + block.group_index().x]) {
+		if (inside) {
+			for (int ch = 0; ch < CHANNELS; ch++)
+				out_color[ch * H * W + pix_id] = 0;
+		}
+		return;
+	}
+
 
 	// Allocate storage for batches of collectively fetched data.
 	__shared__ int collected_id[BLOCK_SIZE];
@@ -393,6 +404,7 @@ void FORWARD::render(
 	float* final_T,
 	uint32_t* n_contrib,
 	uint32_t* n_contrib2loss,
+	bool* compute_locally,
 	const float* bg_color,
 	float* out_color)
 {
@@ -406,6 +418,7 @@ void FORWARD::render(
 		final_T,
 		n_contrib,
 		n_contrib2loss,
+		compute_locally,
 		bg_color,
 		out_color);
 }

@@ -61,6 +61,7 @@ namespace FORWARD
 		float* final_T,
 		uint32_t* n_contrib,
 		uint32_t* n_contrib2loss,
+		bool* compute_locally,
 		const float* bg_color,
 		float* out_color);
 }

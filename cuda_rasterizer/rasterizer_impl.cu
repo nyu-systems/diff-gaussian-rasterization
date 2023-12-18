@@ -650,6 +650,7 @@ int CudaRasterizer::Rasterizer::forward(
 		imgState.accum_alpha,
 		imgState.n_contrib,
 		imgState.n_contrib2loss,
+		distState.compute_locally,
 		background,
 		out_color), debug)
 	timer.stop("70 render");
@@ -771,6 +772,7 @@ void CudaRasterizer::Rasterizer::backward(
 	char* geom_buffer,
 	char* binning_buffer,
 	char* img_buffer,
+	char* dist_buffer,
 	const float* dL_dpix,
 	float* dL_dmean2D,
 	float* dL_dconic,
@@ -815,6 +817,8 @@ void CudaRasterizer::Rasterizer::backward(
 	const dim3 tile_grid((width + BLOCK_X - 1) / BLOCK_X, (height + BLOCK_Y - 1) / BLOCK_Y, 1);
 	const dim3 block(BLOCK_X, BLOCK_Y, 1);
 
+	DistributedState distState = DistributedState::fromChunk(dist_buffer, tile_grid.x * tile_grid.y);
+
 	// Compute loss gradients w.r.t. 2D mean position, conic matrix,
 	// opacity and RGB of Gaussians from per-pixel loss gradients.
 	// If we were given precomputed colors and not SHs, use them.
@@ -832,6 +836,7 @@ void CudaRasterizer::Rasterizer::backward(
 		color_ptr,
 		imgState.accum_alpha,
 		imgState.n_contrib,
+		distState.compute_locally,
 		dL_dpix,
 		(float3*)dL_dmean2D,
 		(float4*)dL_dconic,
