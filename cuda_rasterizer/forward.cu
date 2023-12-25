@@ -301,7 +301,7 @@ renderCUDA(
 	if (!compute_locally[block.group_index().y * horizontal_blocks + block.group_index().x]) {
 		if (inside) {
 			for (int ch = 0; ch < CHANNELS; ch++)
-				out_color[ch * H * W + pix_id] = 0;
+				out_color[ch * H * W + pix_id] = 1.0f * bg_color[ch];
 		}
 		return;
 	}

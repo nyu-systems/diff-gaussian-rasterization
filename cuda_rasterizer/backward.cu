@@ -432,8 +432,12 @@ renderCUDA(
 	bool done = !inside;
 	int toDo = range.y - range.x;
 
-	if (!(compute_locally[block.group_index().y * horizontal_blocks + block.group_index().x] && inside))
-		return;
+	// if (!(compute_locally[block.group_index().y * horizontal_blocks + block.group_index().x] && inside))
+	// 	return;
+	// TODO: delete it; this is useless since toDo is 0; thus this thread will not do anything
+	// RuntimeError: CUDA error: an illegal memory access was encountered
+	// CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+	// For debugging consider passing CUDA_LAUNCH_BLOCKING=1.
 
 	__shared__ int collected_id[BLOCK_SIZE];
 	__shared__ float2 collected_xy[BLOCK_SIZE];

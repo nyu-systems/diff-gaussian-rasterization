@@ -224,7 +224,7 @@ __global__ void getComputeLocally(//TODO: this function is not heavy enough to b
 	if (idx >= tile_num)
 		return;
 
-	uint32_t x = gs_on_tiles_offsets[idx];
+	int x = (int)gs_on_tiles_offsets[idx];
 	if (x > last_local_num_rendered_end && x <= local_num_rendered_end)
 		compute_locally[idx] = true;
 	else
@@ -311,7 +311,9 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 	// MyTimer& timer
 	MyTimerOnGPU& timer
 ){
+	int tile_num = tile_grid.x * tile_grid.y;
 	timer.start("21 updateDistributedStatLocally.getGlobalGaussianOnTiles");
+	cudaMemset(distState.gs_on_tiles, 0, tile_num * sizeof(uint32_t));
 	getGlobalGaussianOnTiles <<<(P + 255) / 256, 256 >>> (
 		P,
 		means2D,
@@ -323,21 +325,20 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 
 	// getComputeLocally
 	if (world_size >= 1) {
-		int tile_num = tile_grid.x * tile_grid.y;
 		timer.start("22 updateDistributedStatLocally.InclusiveSum");
 		cub::DeviceScan::InclusiveSum(distState.scanning_space, distState.scan_size, distState.gs_on_tiles, distState.gs_on_tiles_offsets, tile_num);
 		timer.stop("22 updateDistributedStatLocally.InclusiveSum");
 
-		uint32_t num_rendered;
-		cudaMemcpy(&num_rendered, distState.gs_on_tiles_offsets + tile_num - 1, sizeof(uint32_t), cudaMemcpyDeviceToHost);
+		int num_rendered;
+		cudaMemcpy(&num_rendered, distState.gs_on_tiles_offsets + tile_num - 1, sizeof(int), cudaMemcpyDeviceToHost);
 
 		timer.start("23 updateDistributedStatLocally.getComputeLocally");
 		// find the position by binary search or customized kernal function?
 		const char * division_mode = "rendered_num";//TODO: change mode
 		if (division_mode == "rendered_num") {
-			uint32_t num_rendered_per_device = num_rendered / world_size + 1;
-			uint32_t last_local_num_rendered_end = num_rendered_per_device * local_rank;
-			uint32_t local_num_rendered_end = min(num_rendered_per_device * (local_rank + 1), num_rendered);
+			int num_rendered_per_device = num_rendered / world_size + 1;
+			int last_local_num_rendered_end = num_rendered_per_device * local_rank;
+			int local_num_rendered_end = min(num_rendered_per_device * (local_rank + 1), num_rendered);
 			getComputeLocally <<<(tile_num + 255) / 256, 256 >>> (
 				tile_num,
 				distState.gs_on_tiles_offsets,
@@ -348,9 +349,9 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 			distState.last_local_num_rendered_end = last_local_num_rendered_end;
 			distState.local_num_rendered_end = local_num_rendered_end;
 		} else if (division_mode == "tile_num") {
-			uint32_t num_tiles_per_device =	tile_num / world_size + 1;
-			uint32_t last_local_num_rendered_end = num_tiles_per_device * local_rank;
-			uint32_t local_num_rendered_end = min(num_tiles_per_device * (local_rank + 1), tile_num);
+			int num_tiles_per_device =	tile_num / world_size + 1;
+			int last_local_num_rendered_end = num_tiles_per_device * local_rank;
+			int local_num_rendered_end = min(num_tiles_per_device * (local_rank + 1), tile_num);
 			//TODO: optimze this; in some cases, it will not be divied evenly -> 2170 will be into 1086 and 1084
 			getComputeLocallyByTileNum <<<(tile_num + 255) / 256, 256 >>> (
 				tile_num,
@@ -366,7 +367,6 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 
 	}
 	else {
-		int tile_num = tile_grid.x * tile_grid.y;
 		cudaMemset(distState.compute_locally, true, tile_num * sizeof(bool));
 	}
 
@@ -437,7 +437,7 @@ int CudaRasterizer::Rasterizer::forward(
 	int device;
 	cudaError_t status = cudaGetDevice(&device);
 
-	if (iteration % log_interval == 1) {
+	if (zhx_debug && iteration % log_interval == 1) {
 		// convert zhx_debug, zhx_time, device into one char string for output.
 		sprintf(log_tmp, "world_size: %d, local_rank: %d, iteration: %d, log_folder: %s, zhx_debug: %d, zhx_time: %d, device: %d", world_size, local_rank, iteration, log_folder, zhx_debug, zhx_time, device);
 		save_log_in_file(iteration, local_rank, world_size, log_folder, "cuda", log_tmp);
@@ -581,7 +581,7 @@ int CudaRasterizer::Rasterizer::forward(
 	CHECK_CUDA(, debug)
 	timer.stop("60 identifyTileRanges");
 
-	if (iteration % log_interval == 1  && false)
+	if (false && iteration % log_interval == 1)// TODO: set different debug levels.
 	{
 		if (world_size == 1)
 		{
@@ -660,10 +660,11 @@ int CudaRasterizer::Rasterizer::forward(
 	// Print out timing information
 	if (zhx_time && iteration % log_interval == 1) {
 		timer.printAllTimes(iteration, world_size, local_rank, log_folder);
+	}
 
-		// move distState.last_local_num_rendered_end and distState.local_num_rendered_end to cpu
-		uint32_t last_local_num_rendered_end = distState.last_local_num_rendered_end;
-		uint32_t local_num_rendered_end = distState.local_num_rendered_end;
+	if (zhx_debug && iteration % log_interval == 1) {
+		int last_local_num_rendered_end = distState.last_local_num_rendered_end;
+		int local_num_rendered_end = distState.local_num_rendered_end;
 		uint32_t* gs_on_tiles_cpu = new uint32_t[tile_grid.x * tile_grid.y];
 		CHECK_CUDA(cudaMemcpy(gs_on_tiles_cpu, distState.gs_on_tiles, tile_grid.x * tile_grid.y * sizeof(uint32_t), cudaMemcpyDeviceToHost), debug);
 
@@ -671,10 +672,10 @@ int CudaRasterizer::Rasterizer::forward(
 		bool* compute_locally_cpu = new bool[tile_grid.x * tile_grid.y];
 		CHECK_CUDA(cudaMemcpy(compute_locally_cpu, distState.compute_locally, tile_grid.x * tile_grid.y * sizeof(bool), cudaMemcpyDeviceToHost), debug);
 
-		uint32_t num_local_tiles = 0;
-		uint32_t local_tiles_left_idx = 999999999;
-		uint32_t local_tiles_right_idx = 0;
-		uint32_t num_rendered_from_distState = 0;
+		int num_local_tiles = 0;
+		int local_tiles_left_idx = 999999999;
+		int local_tiles_right_idx = 0;
+		int num_rendered_from_distState = 0;
 		for (int i = 0; i < tile_grid.x * tile_grid.y; i++)
 		{
 			if (compute_locally_cpu[i])
@@ -683,18 +684,18 @@ int CudaRasterizer::Rasterizer::forward(
 					local_tiles_left_idx = i;
 				local_tiles_right_idx = i;
 				num_local_tiles++;
-				num_rendered_from_distState += gs_on_tiles_cpu[i];
+				num_rendered_from_distState += (int)gs_on_tiles_cpu[i];
 			}
 		}
 
-		sprintf(log_tmp, "iteration: %d, num_local_tiles: %d, local_tiles_left_idx: %d, local_tiles_right_idx: %d, last_local_num_rendered_end: %d, local_num_rendered_end: %d, num_rendered: %d, num_rendered_from_distState: %d", iteration, num_local_tiles, local_tiles_left_idx, local_tiles_right_idx, last_local_num_rendered_end, local_num_rendered_end, num_rendered, num_rendered_from_distState);
+		sprintf(log_tmp, "iteration: %d, num_local_tiles: %d, local_tiles_left_idx: %d, local_tiles_right_idx: %d, last_local_num_rendered_end: %d, local_num_rendered_end: %d, num_rendered: %d, num_rendered_from_distState: %d", (int)iteration, (int)num_local_tiles, (int)local_tiles_left_idx, (int)local_tiles_right_idx, (int)last_local_num_rendered_end, (int)local_num_rendered_end, (int)num_rendered, (int)num_rendered_from_distState);
 		save_log_in_file(iteration, local_rank, world_size, log_folder, "num_rendered", log_tmp);
 
 		delete[] compute_locally_cpu;
 		delete[] gs_on_tiles_cpu;
 	}
 
-	if (iteration % log_interval == 1  && zhx_debug)
+	if (zhx_debug && iteration % log_interval == 1)
 	{
 		// move to imgState.ranges to cpu
 		uint2* cpu_ranges = new uint2[tile_grid.x * tile_grid.y];
