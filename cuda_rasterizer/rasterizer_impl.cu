@@ -247,7 +247,7 @@ __global__ void getComputeLocallyByTileNum(//TODO: this function is not heavy en
 		compute_locally[idx] = false;
 }
 
-__global__ void updateTileTouched(//TODO: maybe this could take significant amount of time. 
+__global__ void updateTileTouched(
 	const int P,
 	const dim3 tile_grid,
 	int* radii,
@@ -273,7 +273,7 @@ __global__ void updateTileTouched(//TODO: maybe this could take significant amou
 	tiles_touched[idx] = cnt;
 }
 
-__global__ void getGlobalGaussianOnTiles(
+__global__ void getGlobalGaussianOnTiles(//TODO: maybe this could take significant amount of time. 
 	const int P,
 	const float2* means2D,
 	int* radii,
@@ -581,6 +581,7 @@ int CudaRasterizer::Rasterizer::forward(
 	CHECK_CUDA(, debug)
 	timer.stop("60 identifyTileRanges");
 
+	// DEBUG: print out rectangle and touched information for each tile.
 	if (false && iteration % log_interval == 1)// TODO: set different debug levels.
 	{
 		if (world_size == 1)
@@ -657,11 +658,12 @@ int CudaRasterizer::Rasterizer::forward(
 
 	timer.stop("00 forward");
 
-	// Print out timing information
+	// DEBUG: print out timing information
 	if (zhx_time && iteration % log_interval == 1) {
 		timer.printAllTimes(iteration, world_size, local_rank, log_folder);
 	}
 
+	// DEBUG: print out compute_locally	information
 	if (zhx_debug && iteration % log_interval == 1) {
 		int last_local_num_rendered_end = distState.last_local_num_rendered_end;
 		int local_num_rendered_end = distState.local_num_rendered_end;
@@ -695,6 +697,7 @@ int CudaRasterizer::Rasterizer::forward(
 		delete[] gs_on_tiles_cpu;
 	}
 
+	// DEBUG: print out the number of Gaussians contributing to each pixel.
 	if (zhx_debug && iteration % log_interval == 1)
 	{
 		// move to imgState.ranges to cpu
