@@ -65,3 +65,8 @@ torch::Tensor markVisible(
 		torch::Tensor& means3D,
 		torch::Tensor& viewmatrix,
 		torch::Tensor& projmatrix);
+
+torch::Tensor getTouchedIndices(
+	const torch::Tensor& means3D,
+	const torch::Tensor& viewmatrix,
+    const torch::Tensor& projmatrix);

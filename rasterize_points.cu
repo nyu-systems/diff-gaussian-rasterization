@@ -215,3 +215,24 @@ torch::Tensor markVisible(
   
   return present;
 }
+
+torch::Tensor getTouchedIndices(
+	const torch::Tensor& means3D,
+	const torch::Tensor& viewmatrix,
+    const torch::Tensor& projmatrix)
+{
+	const int P = means3D.size(0);
+
+	torch::Tensor present = torch::full({P}, false, means3D.options().dtype(at::kBool));
+ 
+	if(P != 0)
+	{
+		CudaRasterizer::Rasterizer::getTouchedIndices(P,
+			means3D.contiguous().data<float>(),
+			viewmatrix.contiguous().data<float>(),
+			projmatrix.contiguous().data<float>(),
+			present.contiguous().data<bool>());
+	}
+
+	return present;
+}

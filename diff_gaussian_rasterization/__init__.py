@@ -183,6 +183,16 @@ class GaussianRasterizer(nn.Module):
                 raster_settings.projmatrix)
             
         return visible
+    
+    def getTouchedIndices(self, positions):
+        with torch.no_grad():
+            raster_settings = self.raster_settings
+            visible = _C.get_touched_indices(
+                positions,
+                raster_settings.viewmatrix,
+                raster_settings.projmatrix)
+
+        return visible
 
     def forward(self, means3D, means2D, opacities, shs = None, colors_precomp = None, scales = None, rotations = None, cov3D_precomp = None):
         

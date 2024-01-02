@@ -65,6 +65,20 @@ __global__ void checkFrustum(int P,
 	present[idx] = in_frustum(idx, orig_points, viewmatrix, projmatrix, false, p_view);
 }
 
+__global__ void checkSendTogpu(int P,
+	const float* orig_points,
+	const float* viewmatrix,
+	const float* projmatrix,
+	bool* present)
+{
+	auto idx = cg::this_grid().thread_rank();
+	if (idx >= P)
+		return;
+
+	float3 p_view;
+	present[idx] = sendTogpu(idx, orig_points, viewmatrix, projmatrix, false, p_view);
+}
+
 // Generates one key/value pair for all Gaussian / tile overlaps. 
 // Run once per Gaussian (1:N mapping).
 __global__ void duplicateWithKeys(
@@ -146,6 +160,20 @@ void CudaRasterizer::Rasterizer::markVisible(
 	bool* present)
 {
 	checkFrustum << <(P + 255) / 256, 256 >> > (
+		P,
+		means3D,
+		viewmatrix, projmatrix,
+		present);
+}
+
+void CudaRasterizer::Rasterizer::getTouchedIndices(
+	int P,
+	float* means3D,
+	float* viewmatrix,
+	float* projmatrix,
+	bool* present)
+{
+	checkSendTogpu << <(P + 255) / 256, 256 >> > (
 		P,
 		means3D,
 		viewmatrix, projmatrix,

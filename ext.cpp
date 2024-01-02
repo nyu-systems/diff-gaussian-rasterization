@@ -16,4 +16,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("rasterize_gaussians", &RasterizeGaussiansCUDA);
   m.def("rasterize_gaussians_backward", &RasterizeGaussiansBackwardCUDA);
   m.def("mark_visible", &markVisible);
+  m.def("get_touched_indices", &getTouchedIndices);
+  //TODO: get the indices of 3dgs that will be rendered to an image. Use openMP. 
 }
