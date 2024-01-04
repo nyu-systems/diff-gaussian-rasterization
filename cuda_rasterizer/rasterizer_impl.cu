@@ -308,7 +308,7 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 	CudaRasterizer::DistributedState& distState,
 	const int local_rank,
 	const int world_size,
-	// MyTimer& timer
+	const char * dist_division_mode,
 	MyTimerOnGPU& timer
 ){
 	int tile_num = tile_grid.x * tile_grid.y;
@@ -334,8 +334,8 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 
 		timer.start("23 updateDistributedStatLocally.getComputeLocally");
 		// find the position by binary search or customized kernal function?
-		const char * division_mode = "rendered_num";//TODO: change mode
-		if (division_mode == "rendered_num") {
+		// printf("dist_division_mode: %s, length: %d\n", dist_division_mode, strlen(dist_division_mode));
+		if (strcmp(dist_division_mode, "rendered_num") == 0) {
 			int num_rendered_per_device = num_rendered / world_size + 1;
 			int last_local_num_rendered_end = num_rendered_per_device * local_rank;
 			int local_num_rendered_end = min(num_rendered_per_device * (local_rank + 1), num_rendered);
@@ -348,7 +348,7 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 			);
 			distState.last_local_num_rendered_end = last_local_num_rendered_end;
 			distState.local_num_rendered_end = local_num_rendered_end;
-		} else if (division_mode == "tile_num") {
+		} else if (strcmp(dist_division_mode, "tile_num") == 0) {
 			int num_tiles_per_device =	tile_num / world_size + 1;
 			int last_local_num_rendered_end = num_tiles_per_device * local_rank;
 			int local_num_rendered_end = min(num_tiles_per_device * (local_rank + 1), tile_num);
@@ -361,6 +361,8 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 			);
 			distState.last_local_num_rendered_end = last_local_num_rendered_end;
 			distState.local_num_rendered_end = local_num_rendered_end;
+		} else {
+			printf("division_mode: %s is not supported.\n", dist_division_mode);
 		}
 		timer.stop("23 updateDistributedStatLocally.getComputeLocally");
 
@@ -433,6 +435,7 @@ int CudaRasterizer::Rasterizer::forward(
 	bool zhx_time = false;
 	if (zhx_time_str != nullptr && strcmp(zhx_time_str, "true") == 0) zhx_time = true;
 	char* log_tmp = new char[500];
+	const char* dist_division_mode = getenv("DIST_DIVISION_MODE");
 	// print out the environment variables
 	int device;
 	cudaError_t status = cudaGetDevice(&device);
@@ -516,6 +519,7 @@ int CudaRasterizer::Rasterizer::forward(
 			distState,
 			local_rank,
 			world_size,
+			dist_division_mode,
 			timer
 		);
 	} else {
