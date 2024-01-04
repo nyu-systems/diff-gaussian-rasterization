@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <numeric>
 #include <string>
+#include <cstdlib>
 #include <chrono>
 #include <cuda.h>
 #include "cuda_runtime.h"
@@ -247,6 +248,26 @@ __global__ void getComputeLocallyByTileNum(//TODO: this function is not heavy en
 		compute_locally[idx] = false;
 }
 
+__global__ void getComputeLocallyByRowId(
+	const int tile_num,
+	bool* compute_locally,
+	int tile_grid_x,
+	int tile_grid_y,
+	int row_id
+) {
+	auto idx = cg::this_grid().thread_rank();
+	if (idx >= tile_num)
+		return;
+
+	int tile_x = idx % tile_grid_x;
+	int tile_y = idx / tile_grid_x;
+	if (tile_y == row_id)
+		compute_locally[idx] = true;
+	else
+		compute_locally[idx] = false;
+}
+
+
 __global__ void updateTileTouched(
 	const int P,
 	const dim3 tile_grid,
@@ -362,7 +383,18 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 			distState.last_local_num_rendered_end = last_local_num_rendered_end;
 			distState.local_num_rendered_end = local_num_rendered_end;
 		} else {
-			printf("division_mode: %s is not supported.\n", dist_division_mode);
+			int row_id = atoi(dist_division_mode);
+			getComputeLocallyByRowId <<<(tile_num + 255) / 256, 256 >>> (
+				tile_num,
+				distState.compute_locally,
+				tile_grid.x,
+				tile_grid.y,
+				row_id
+			);
+			distState.last_local_num_rendered_end = row_id * tile_grid.x;
+			distState.local_num_rendered_end = (row_id + 1) * tile_grid.x;
+
+			// printf("division_mode: %s is not supported.\n", dist_division_mode);
 		}
 		timer.stop("23 updateDistributedStatLocally.getComputeLocally");
 
@@ -694,7 +726,7 @@ int CudaRasterizer::Rasterizer::forward(
 			}
 		}
 
-		sprintf(log_tmp, "iteration: %d, num_local_tiles: %d, local_tiles_left_idx: %d, local_tiles_right_idx: %d, last_local_num_rendered_end: %d, local_num_rendered_end: %d, num_rendered: %d, num_rendered_from_distState: %d", (int)iteration, (int)num_local_tiles, (int)local_tiles_left_idx, (int)local_tiles_right_idx, (int)last_local_num_rendered_end, (int)local_num_rendered_end, (int)num_rendered, (int)num_rendered_from_distState);
+		sprintf(log_tmp, "num_local_tiles: %d, local_tiles_left_idx: %d, local_tiles_right_idx: %d, last_local_num_rendered_end: %d, local_num_rendered_end: %d, num_rendered: %d, num_rendered_from_distState: %d", (int)num_local_tiles, (int)local_tiles_left_idx, (int)local_tiles_right_idx, (int)last_local_num_rendered_end, (int)local_num_rendered_end, (int)num_rendered, (int)num_rendered_from_distState);
 		save_log_in_file(iteration, local_rank, world_size, log_folder, "num_rendered", log_tmp);
 
 		delete[] compute_locally_cpu;
@@ -707,14 +739,15 @@ int CudaRasterizer::Rasterizer::forward(
 		// move to imgState.ranges to cpu
 		uint2* cpu_ranges = new uint2[tile_grid.x * tile_grid.y];
 		CHECK_CUDA(cudaMemcpy(cpu_ranges, imgState.ranges, tile_grid.x * tile_grid.y * sizeof(uint2), cudaMemcpyDeviceToHost), debug);
-		uint32_t* cpu_n_contrib = new uint32_t[width * height];
-		cudaMemcpy(cpu_n_contrib, imgState.n_contrib, width * height * sizeof(uint32_t), cudaMemcpyDeviceToHost);
+		uint32_t* cpu_n_considered = new uint32_t[width * height];
+		cudaMemcpy(cpu_n_considered, imgState.n_contrib, width * height * sizeof(uint32_t), cudaMemcpyDeviceToHost);
 		uint32_t* cpu_n_contrib2loss = new uint32_t[width * height];
 		cudaMemcpy(cpu_n_contrib2loss, imgState.n_contrib2loss, width * height * sizeof(uint32_t), cudaMemcpyDeviceToHost);
 
-		float global_n_contrib = 0;
-		float global_n_contrib_ratio = 0;
-		float global_n_contrib2loss = 0;
+		float global_sum_n_rendered = 0;
+		float global_sum_n_considered = 0;
+		float global_sum_n_contrib2loss = 0;
+		int total_pixels = 0;
 		int num_local_tiles = 0;
 
 		for (int i = 0; i < tile_grid.x * tile_grid.y; i++)
@@ -724,35 +757,61 @@ int CudaRasterizer::Rasterizer::forward(
 			int tile_y = i / tile_grid.x;
 			int2 pix_min = { tile_x * BLOCK_X, tile_y * BLOCK_Y };
 			int2 pix_max = { min(pix_min.x + BLOCK_X, width), min(pix_min.y + BLOCK_Y , height) };
-			int sum_n_contrib = 0;
+			int num_pix = (pix_max.y - pix_min.y) * (pix_max.x - pix_min.x);
+			int n_rendered = cpu_ranges[i].y - cpu_ranges[i].x;
+			if (n_rendered <= 0)
+				continue;
+
+			int sum_n_considered = 0;
 			int sum_n_contrib2loss = 0;
 			for (int y = pix_min.y; y < pix_max.y; y++)
 				for (int x = pix_min.x; x < pix_max.x; x++) {
-					sum_n_contrib += (int)cpu_n_contrib[y * width + x];
+					sum_n_considered += (int)cpu_n_considered[y * width + x];
 					sum_n_contrib2loss += (int)cpu_n_contrib2loss[y * width + x];
 				}
-			float ave_n_contrib = (float)sum_n_contrib / ((pix_max.y - pix_min.y) * (pix_max.x - pix_min.x));
-			float ave_n_contrib2loss = (float)sum_n_contrib2loss / ((pix_max.y - pix_min.y) * (pix_max.x - pix_min.x));
+			float ave_n_considered = (float)sum_n_considered / num_pix;
+			float ave_n_contrib2loss = (float)sum_n_contrib2loss / num_pix;
 
-			float contrib_ratio = 0;
-			if (cpu_ranges[i].x < cpu_ranges[i].y)
-				contrib_ratio = ave_n_contrib2loss / (cpu_ranges[i].y - cpu_ranges[i].x);
+			float contrib2loss_ratio = 0;
+			if (num_pix > 0)
+				contrib2loss_ratio = ave_n_contrib2loss / num_pix;
 
-			sprintf(log_tmp, "tile: (%d, %d), range: (%d, %d), local_num_rendered: %d, local_last_n_contrib: %f, local_real_n_contrib: %f, contrib_ratio: %f", tile_y, tile_x, (int)cpu_ranges[i].y, (int)cpu_ranges[i].x, (int)cpu_ranges[i].y-(int)cpu_ranges[i].x, ave_n_contrib, ave_n_contrib2loss, contrib_ratio);
+			sprintf(log_tmp, "tile: (%d, %d), range: (%d, %d), num_rendered_this_tile: %d, n_considered_per_pixel: %f, n_contrib2loss_per_pixel: %f, contrib2loss_ratio: %f", 
+				tile_y,
+				tile_x,
+				(int)cpu_ranges[i].y,
+				(int)cpu_ranges[i].x,
+				n_rendered,
+				ave_n_considered,
+				ave_n_contrib2loss,
+				contrib2loss_ratio);
+
 			save_log_in_file(iteration, local_rank, world_size, log_folder, "n_contrib", log_tmp);
-			global_n_contrib += ave_n_contrib;
-			global_n_contrib2loss += ave_n_contrib2loss;
-			global_n_contrib_ratio += contrib_ratio;
-			if (cpu_ranges[i].x < cpu_ranges[i].y) num_local_tiles++;
+			global_sum_n_rendered += n_rendered;
+			global_sum_n_considered += sum_n_considered;
+			global_sum_n_contrib2loss += sum_n_contrib2loss;
+			total_pixels += num_pix;
+			num_local_tiles++;
 		}
-		global_n_contrib = global_n_contrib / (float)num_local_tiles;
-		global_n_contrib2loss = global_n_contrib2loss / (float)num_local_tiles;
-		global_n_contrib_ratio = global_n_contrib_ratio / (float)num_local_tiles;
-		sprintf(log_tmp, "iteration: %d, local_rank: %d, world_size: %d, num_local_tiles: %d, global_num_rendered: %d, global_last_n_contrib: %f, global_n_contrib2loss: %f, contrib_ratio: %f", iteration, local_rank, world_size, num_local_tiles, num_rendered, global_n_contrib, global_n_contrib2loss, global_n_contrib_ratio);
+		float global_ave_n_rendered_per_pix = global_sum_n_rendered / (float)num_local_tiles;
+		float global_ave_n_considered_per_pix = global_sum_n_considered / (float)total_pixels;
+		float global_ave_n_contrib2loss_per_pix = global_sum_n_contrib2loss / (float)total_pixels;
+
+		sprintf(log_tmp, "local_rank: %d, world_size: %d, num_tiles: %d, num_pixels: %d, num_rendered: %d, global_ave_n_rendered_per_pix: %f, global_ave_n_considered_per_pix: %f, global_ave_n_contrib2loss_per_pix: %f", 
+			(int)local_rank,
+			(int)world_size,
+			(int)num_local_tiles,
+			(int)total_pixels,
+			(int)global_sum_n_rendered, 
+			global_ave_n_rendered_per_pix, 
+			global_ave_n_considered_per_pix, 
+			global_ave_n_contrib2loss_per_pix
+		);
 		save_log_in_file(iteration, local_rank, world_size, log_folder, "n_contrib", log_tmp);
 
 		delete[] cpu_ranges;
-		delete[] cpu_n_contrib;
+		delete[] cpu_n_considered;
+		delete[] cpu_n_contrib2loss;
 	}
 
 	delete[] log_tmp;
