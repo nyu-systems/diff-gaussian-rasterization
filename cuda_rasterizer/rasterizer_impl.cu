@@ -774,7 +774,7 @@ int CudaRasterizer::Rasterizer::forward(
 
 			float contrib2loss_ratio = 0;
 			if (num_pix > 0)
-				contrib2loss_ratio = ave_n_contrib2loss / num_pix;
+				contrib2loss_ratio = ave_n_contrib2loss / n_rendered;
 
 			sprintf(log_tmp, "tile: (%d, %d), range: (%d, %d), num_rendered_this_tile: %d, n_considered_per_pixel: %f, n_contrib2loss_per_pixel: %f, contrib2loss_ratio: %f", 
 				tile_y,
