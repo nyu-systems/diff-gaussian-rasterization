@@ -253,7 +253,8 @@ __global__ void getComputeLocallyByRowId(
 	bool* compute_locally,
 	int tile_grid_x,
 	int tile_grid_y,
-	int row_id
+	int row_id_start,
+	int row_id_end
 ) {
 	auto idx = cg::this_grid().thread_rank();
 	if (idx >= tile_num)
@@ -261,7 +262,7 @@ __global__ void getComputeLocallyByRowId(
 
 	int tile_x = idx % tile_grid_x;
 	int tile_y = idx / tile_grid_x;
-	if (tile_y == row_id)
+	if (tile_y >= row_id_start && tile_y < row_id_end)
 		compute_locally[idx] = true;
 	else
 		compute_locally[idx] = false;
@@ -383,16 +384,29 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 			distState.last_local_num_rendered_end = last_local_num_rendered_end;
 			distState.local_num_rendered_end = local_num_rendered_end;
 		} else {
-			int row_id = atoi(dist_division_mode);
+			// dist_division_mode example: "0,1" or "10,20"
+			char* dist_division_mode_left = new char[strlen(dist_division_mode) + 1];
+			char* dist_division_mode_right = new char[strlen(dist_division_mode) + 1];
+			strcpy(dist_division_mode_left, dist_division_mode);
+			strcpy(dist_division_mode_right, dist_division_mode);
+			char* pch = strtok(dist_division_mode_left, ",");
+			int row_id_start = atoi(pch);
+			pch = strtok(NULL, ",");
+			int row_id_end = atoi(pch);
+			delete[] dist_division_mode_left;
+			delete[] dist_division_mode_right;
+			// printf("dist_division_mode is %s, row_id_start is %d, row_id_end is %d\n", dist_division_mode, row_id_start, row_id_end);
+
 			getComputeLocallyByRowId <<<(tile_num + 255) / 256, 256 >>> (
 				tile_num,
 				distState.compute_locally,
 				tile_grid.x,
 				tile_grid.y,
-				row_id
+				row_id_start,
+				row_id_end
 			);
-			distState.last_local_num_rendered_end = row_id * tile_grid.x;
-			distState.local_num_rendered_end = (row_id + 1) * tile_grid.x;
+			distState.last_local_num_rendered_end = row_id_start * tile_grid.x;
+			distState.local_num_rendered_end = row_id_end * tile_grid.x;
 
 			// printf("division_mode: %s is not supported.\n", dist_division_mode);
 		}
