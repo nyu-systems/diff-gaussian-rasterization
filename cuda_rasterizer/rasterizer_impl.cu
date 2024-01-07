@@ -747,6 +747,7 @@ int CudaRasterizer::Rasterizer::forward(
 		delete[] gs_on_tiles_cpu;
 	}
 
+	// TODO: write a kernel to sum a block for n_contrib2loss and save the result and then send back to cpu. 
 	// DEBUG: print out the number of Gaussians contributing to each pixel.
 	if (zhx_debug && iteration % log_interval == 1)
 	{
