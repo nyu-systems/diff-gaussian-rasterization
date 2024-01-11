@@ -558,29 +558,35 @@ int CudaRasterizer::Rasterizer::forward(
 	int* n_render,// TODO: int* could not match with uint32_t*. error may occur, especially when the number is large.
 	int* n_consider,// If your uint32_t array contains values higher than 2,147,483,647, they will overflow when converted to int.
 	int* n_contrib,
-	bool debug)
+	bool debug,
+	const pybind11::dict &args)
 {
-	int local_rank = get_env_var("LOCAL_RANK");
-	int world_size = get_env_var("WORLD_SIZE");
-	if (world_size == 0) world_size = 1;
-	int iteration = get_env_var("ITERATION");
-	int log_interval = get_env_var("LOG_INTERVAL");
-	const char* log_folder = getenv("LOG_FOLDER");
-	const char* zhx_debug_str = getenv("ZHX_DEBUG");
-	bool zhx_debug = false;
-	if (zhx_debug_str != nullptr && strcmp(zhx_debug_str, "true") == 0) zhx_debug = true;
-	const char* zhx_time_str = getenv("ZHX_TIME");
-	bool zhx_time = false;
-	if (zhx_time_str != nullptr && strcmp(zhx_time_str, "true") == 0) zhx_time = true;
-	char* log_tmp = new char[500];
-	const char* dist_division_mode = getenv("DIST_DIVISION_MODE");
+	// print out the local_rank of args
+	std::string local_rank_str = args["local_rank"].cast<std::string>();
+	std::string world_size_str = args["world_size"].cast<std::string>();
+	std::string iteration_str = args["iteration"].cast<std::string>();
+	std::string log_interval_str = args["log_interval"].cast<std::string>();
+	std::string log_folder_str = args["log_folder"].cast<std::string>();
+	std::string zhx_debug_str = args["zhx_debug"].cast<std::string>();
+	std::string zhx_time_str = args["zhx_time"].cast<std::string>();
+	std::string dist_division_mode_str = args["dist_division_mode"].cast<std::string>();
+	int local_rank = std::stoi(local_rank_str);
+	int world_size = std::stoi(world_size_str);
+	int iteration = std::stoi(iteration_str);
+	int log_interval = std::stoi(log_interval_str);
+	bool zhx_debug = zhx_debug_str == "True";
+	bool zhx_time = zhx_time_str == "True";
+	const char* dist_division_mode = dist_division_mode_str.c_str();
+	const char* log_folder = log_folder_str.c_str();
 	// print out the environment variables
+
+	char* log_tmp = new char[500];
 	int device;
 	cudaError_t status = cudaGetDevice(&device);
 
 	if (zhx_debug && iteration % log_interval == 1) {
 		// convert zhx_debug, zhx_time, device into one char string for output.
-		sprintf(log_tmp, "world_size: %d, local_rank: %d, iteration: %d, log_folder: %s, zhx_debug: %d, zhx_time: %d, device: %d", world_size, local_rank, iteration, log_folder, zhx_debug, zhx_time, device);
+		sprintf(log_tmp, "world_size: %d, local_rank: %d, iteration: %d, log_folder: %s, zhx_debug: %d, zhx_time: %d, device: %d, log_interval: %d, dist_division_mode: %s", world_size, local_rank, iteration, log_folder, zhx_debug, zhx_time, device, log_interval, dist_division_mode);
 		save_log_in_file(iteration, local_rank, world_size, log_folder, "cuda", log_tmp);
 	}
 

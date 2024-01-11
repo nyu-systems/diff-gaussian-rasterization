@@ -14,6 +14,12 @@
 
 #include <vector>
 #include <functional>
+#include <torch/extension.h>
+
+// #include <pybind11/pybind11.h>
+// #include <pybind11/stl.h>
+// Either of the above two headers could make the compilation successful; 
+// however, <pybind11/pybind11.h> will make the compilation very slow.
 
 namespace CudaRasterizer
 {
@@ -54,7 +60,8 @@ namespace CudaRasterizer
 			int* n_render = nullptr,
 			int* n_consider = nullptr,
 			int* n_contrib = nullptr,
-			bool debug = false);
+			bool debug = false,
+			const pybind11::dict &args = pybind11::dict());
 
 		static void backward(
 			const int P, int D, int M, int R,
