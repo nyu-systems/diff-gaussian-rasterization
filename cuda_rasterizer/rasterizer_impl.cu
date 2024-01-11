@@ -214,6 +214,51 @@ CudaRasterizer::DistributedState CudaRasterizer::DistributedState::fromChunk(cha
 	return dist;
 }
 
+__global__ void get_n_render(
+	const int tile_num,
+	const uint2* ranges,
+	int* n_render
+) {
+	auto idx = cg::this_grid().thread_rank();
+	if (idx >= tile_num)
+		return;
+	n_render[idx] = ranges[idx].y - ranges[idx].x;
+}
+
+__global__ void reduce_data_per_block(
+	const int width,
+	const int height,
+	const uint32_t* n_data_per_pixel,
+	int* n_data_per_block,
+	bool* compute_locally
+) {
+	auto block = cg::this_thread_block();
+	if (!compute_locally[block.group_index().y * gridDim.x + block.group_index().x])
+		return;
+	uint2 pix_min = { block.group_index().x * BLOCK_X, block.group_index().y * BLOCK_Y };
+	uint2 pix = { pix_min.x + block.thread_index().x, pix_min.y + block.thread_index().y };
+	int pix_id = width * pix.y + pix.x;
+
+	int blocksz = block.size(), beta;
+	__shared__ int reduction_s[BLOCK_X * BLOCK_Y];
+	int tid = block.thread_rank();
+
+	bool inside = pix.x < width && pix.y < height;
+	int data = inside ? (int)n_data_per_pixel[pix_id] : 0;// TODO: make sure the explicit cast is correct, i.e. n_data_per_pixel < 2^31-1;
+
+	cg::thread_block_tile<32> tile = cg::tiled_partition<32>(block);
+	reduction_s[tid] = cg::reduce(tile, data, cg::plus<int>());
+    cg::sync(block);
+
+    if (tid == 0) {
+        beta = 0;
+        for (int i = 0; i < blocksz; i += tile.num_threads()) {
+            beta += reduction_s[i];
+        }
+        n_data_per_block[block.group_index().y * gridDim.x + block.group_index().x] = beta;
+    }
+}
+
 __global__ void getComputeLocally(//TODO: this function is not heavy enough to be parallelized.
 	const int tile_num,
 	uint32_t* gs_on_tiles_offsets,
@@ -243,6 +288,22 @@ __global__ void getComputeLocallyByTileNum(//TODO: this function is not heavy en
 		return;
 
 	if (idx >= last_local_num_rendered_end && idx < local_num_rendered_end)
+		compute_locally[idx] = true;
+	else
+		compute_locally[idx] = false;
+}
+
+__global__ void getComputeLocallyByTileId(
+	const int tile_num,
+	bool* compute_locally,
+	int tile_id_start,
+	int tile_id_end
+) {
+	auto idx = cg::this_grid().thread_rank();
+	if (idx >= tile_num)
+		return;
+
+	if (idx >= tile_id_start && idx < tile_id_end)
 		compute_locally[idx] = true;
 	else
 		compute_locally[idx] = false;
@@ -383,8 +444,36 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 			);
 			distState.last_local_num_rendered_end = last_local_num_rendered_end;
 			distState.local_num_rendered_end = local_num_rendered_end;
+		} else if (dist_division_mode[0] == 'T') {
+			// dist_division_mode example: "T:0,1" or "T:10,20"
+			char* dist_division_mode_left = new char[strlen(dist_division_mode) + 1];
+			char* dist_division_mode_right = new char[strlen(dist_division_mode) + 1];
+			strcpy(dist_division_mode_left, dist_division_mode);
+			strcpy(dist_division_mode_right, dist_division_mode);
+			
+			char* pch = strtok(dist_division_mode_left, ":");
+			pch = strtok(NULL, ":");
+			pch = strtok(pch, ",");
+			int tile_id_start = atoi(pch);
+			pch = strtok(NULL, ",");
+			int tile_id_end = atoi(pch);
+			delete[] dist_division_mode_left;
+			delete[] dist_division_mode_right;
+			// printf("dist_division_mode is %s, tile_id_start is %d, tile_id_end is %d\n", dist_division_mode, tile_id_start, tile_id_end);
+			
+			getComputeLocallyByTileId <<<(tile_num + 255) / 256, 256 >>> (
+				tile_num,
+				distState.compute_locally,
+				tile_id_start,
+				tile_id_end
+			);
+			distState.last_local_num_rendered_end = tile_id_start;
+			distState.local_num_rendered_end = tile_id_end;
+
 		} else {
 			// dist_division_mode example: "0,1" or "10,20"
+			// TODO: refactor code: I should change it into: "R:0,1" or "R:10,20" later. refactor code.
+
 			char* dist_division_mode_left = new char[strlen(dist_division_mode) + 1];
 			char* dist_division_mode_right = new char[strlen(dist_division_mode) + 1];
 			strcpy(dist_division_mode_left, dist_division_mode);
@@ -466,6 +555,9 @@ int CudaRasterizer::Rasterizer::forward(
 	const bool prefiltered,
 	float* out_color,
 	int* radii,
+	int* n_render,// TODO: int* could not match with uint32_t*. error may occur, especially when the number is large.
+	int* n_consider,// If your uint32_t array contains values higher than 2,147,483,647, they will overflow when converted to int.
+	int* n_contrib,
 	bool debug)
 {
 	int local_rank = get_env_var("LOCAL_RANK");
@@ -510,6 +602,7 @@ int CudaRasterizer::Rasterizer::forward(
 
 	dim3 tile_grid((width + BLOCK_X - 1) / BLOCK_X, (height + BLOCK_Y - 1) / BLOCK_Y, 1);
 	dim3 block(BLOCK_X, BLOCK_Y, 1);
+	int tile_num = tile_grid.x * tile_grid.y;
 
 	// Dynamically resize image-based auxiliary buffers during training
 	size_t img_chunk_size = required<ImageState>(width * height);
@@ -569,7 +662,6 @@ int CudaRasterizer::Rasterizer::forward(
 			timer
 		);
 	} else {
-		int tile_num = tile_grid.x * tile_grid.y;
 		cudaMemset(distState.compute_locally, true, tile_num * sizeof(bool));
 	}
 	timer.stop("20 updateDistributedStatLocally");
@@ -706,8 +798,36 @@ int CudaRasterizer::Rasterizer::forward(
 		out_color), debug)
 	timer.stop("70 render");
 
+	// TODO: write a kernel to sum a block for n_contrib2loss and save the result in contrib. 
+	// We may have different implementation.
+
+	timer.start("81 sum_n_render");
+	get_n_render<<< (tile_num + 255) / 256, 256 >>> (
+		tile_num,
+		imgState.ranges,
+		n_render
+	);
+	timer.stop("81 sum_n_render");
+	timer.start("82 sum_n_consider");
+	reduce_data_per_block<< <tile_grid, block >> > (
+		width, height,
+		imgState.n_contrib,
+		n_consider,
+		distState.compute_locally
+	);
+	timer.stop("82 sum_n_consider");
+	timer.start("83 sum_n_contrib");
+	reduce_data_per_block<< <tile_grid, block >> > (
+		width, height,
+		imgState.n_contrib2loss,
+		n_contrib,
+		distState.compute_locally
+	);
+	timer.stop("83 sum_n_contrib");
+
 	timer.stop("00 forward");
 
+	//////////////////////////// Logging && Save Statictis ////////////////////////////////////////////
 	// DEBUG: print out timing information
 	if (zhx_time && iteration % log_interval == 1) {
 		timer.printAllTimes(iteration, world_size, local_rank, log_folder);
@@ -747,7 +867,6 @@ int CudaRasterizer::Rasterizer::forward(
 		delete[] gs_on_tiles_cpu;
 	}
 
-	// TODO: write a kernel to sum a block for n_contrib2loss and save the result and then send back to cpu. 
 	// DEBUG: print out the number of Gaussians contributing to each pixel.
 	if (zhx_debug && iteration % log_interval == 1)
 	{
