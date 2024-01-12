@@ -561,14 +561,14 @@ int CudaRasterizer::Rasterizer::forward(
 	bool debug,
 	const pybind11::dict &args)
 {
-	// print out the local_rank of args
+	std::string mode = args["mode"].cast<std::string>();//"train", "test"
 	std::string local_rank_str = args["local_rank"].cast<std::string>();
 	std::string world_size_str = args["world_size"].cast<std::string>();
 	std::string iteration_str = args["iteration"].cast<std::string>();
 	std::string log_interval_str = args["log_interval"].cast<std::string>();
 	std::string log_folder_str = args["log_folder"].cast<std::string>();
-	std::string zhx_debug_str = args["zhx_debug"].cast<std::string>();
-	std::string zhx_time_str = args["zhx_time"].cast<std::string>();
+	std::string zhx_debug_str = args["zhx_debug"].cast<std::string>();// "True", "False"
+	std::string zhx_time_str = args["zhx_time"].cast<std::string>();// "True", "False"
 	std::string dist_division_mode_str = args["dist_division_mode"].cast<std::string>();
 	int local_rank = std::stoi(local_rank_str);
 	int world_size = std::stoi(world_size_str);
@@ -584,8 +584,7 @@ int CudaRasterizer::Rasterizer::forward(
 	int device;
 	cudaError_t status = cudaGetDevice(&device);
 
-	if (zhx_debug && iteration % log_interval == 1) {
-		// convert zhx_debug, zhx_time, device into one char string for output.
+	if (mode == "train" && zhx_debug && iteration % log_interval == 1) {
 		sprintf(log_tmp, "world_size: %d, local_rank: %d, iteration: %d, log_folder: %s, zhx_debug: %d, zhx_time: %d, device: %d, log_interval: %d, dist_division_mode: %s", world_size, local_rank, iteration, log_folder, zhx_debug, zhx_time, device, log_interval, dist_division_mode);
 		save_log_in_file(iteration, local_rank, world_size, log_folder, "cuda", log_tmp);
 	}
@@ -730,7 +729,7 @@ int CudaRasterizer::Rasterizer::forward(
 	timer.stop("60 identifyTileRanges");
 
 	// DEBUG: print out rectangle and touched information for each tile.
-	if (false && iteration % log_interval == 1)// TODO: set different debug levels.
+	if (mode == "train" && false && iteration % log_interval == 1)// TODO: set different debug levels.
 	{
 		if (world_size == 1)
 		{
@@ -835,12 +834,12 @@ int CudaRasterizer::Rasterizer::forward(
 
 	//////////////////////////// Logging && Save Statictis ////////////////////////////////////////////
 	// DEBUG: print out timing information
-	if (zhx_time && iteration % log_interval == 1) {
+	if (mode == "train" && zhx_time && iteration % log_interval == 1) {
 		timer.printAllTimes(iteration, world_size, local_rank, log_folder);
 	}
 
 	// DEBUG: print out compute_locally	information
-	if (zhx_debug && iteration % log_interval == 1) {
+	if (mode == "train" && zhx_debug && iteration % log_interval == 1) {
 		int last_local_num_rendered_end = distState.last_local_num_rendered_end;
 		int local_num_rendered_end = distState.local_num_rendered_end;
 		uint32_t* gs_on_tiles_cpu = new uint32_t[tile_grid.x * tile_grid.y];
@@ -874,7 +873,7 @@ int CudaRasterizer::Rasterizer::forward(
 	}
 
 	// DEBUG: print out the number of Gaussians contributing to each pixel.
-	if (zhx_debug && iteration % log_interval == 1)
+	if (mode == "train" && zhx_debug && iteration % log_interval == 1)
 	{
 		// move to imgState.ranges to cpu
 		uint2* cpu_ranges = new uint2[tile_grid.x * tile_grid.y];
@@ -990,20 +989,24 @@ void CudaRasterizer::Rasterizer::backward(
 	float* dL_dsh,
 	float* dL_dscale,
 	float* dL_drot,
-	bool debug)
+	bool debug,
+	const pybind11::dict &args)
 {
-	int local_rank = get_env_var("LOCAL_RANK");
-	int world_size = get_env_var("WORLD_SIZE");
-	if (world_size == 0) world_size = 1;
-	int iteration = get_env_var("ITERATION");
-	const char* log_folder = getenv("LOG_FOLDER");
-	int log_interval = get_env_var("LOG_INTERVAL");
-	const char* zhx_debug_str = getenv("ZHX_DEBUG");
-	bool zhx_debug = false;
-	if (zhx_debug_str != nullptr && strcmp(zhx_debug_str, "true") == 0) zhx_debug = true;
-	const char* zhx_time_str = getenv("ZHX_TIME");
-	bool zhx_time = false;
-	if (zhx_time_str != nullptr && strcmp(zhx_time_str, "true") == 0) zhx_time = true;
+	std::string mode = args["mode"].cast<std::string>();//"train", "test"
+	std::string local_rank_str = args["local_rank"].cast<std::string>();
+	std::string world_size_str = args["world_size"].cast<std::string>();
+	std::string iteration_str = args["iteration"].cast<std::string>();
+	std::string log_interval_str = args["log_interval"].cast<std::string>();
+	std::string log_folder_str = args["log_folder"].cast<std::string>();
+	std::string zhx_debug_str = args["zhx_debug"].cast<std::string>();// "True", "False"
+	std::string zhx_time_str = args["zhx_time"].cast<std::string>();// "True", "False"
+	int local_rank = std::stoi(local_rank_str);
+	int world_size = std::stoi(world_size_str);
+	int iteration = std::stoi(iteration_str);
+	int log_interval = std::stoi(log_interval_str);
+	bool zhx_debug = zhx_debug_str == "True";
+	bool zhx_time = zhx_time_str == "True";
+	const char* log_folder = log_folder_str.c_str();
 
 	// MyTimer timer;
 	MyTimerOnGPU timer;//TODO: two types of timer.

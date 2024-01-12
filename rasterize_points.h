@@ -61,7 +61,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	const torch::Tensor& binningBuffer,
 	const torch::Tensor& imageBuffer,
 	const torch::Tensor& distBuffer,
-	const bool debug);
+	const bool debug,
+	const pybind11::dict &args);
 		
 torch::Tensor markVisible(
 		torch::Tensor& means3D,
