@@ -95,6 +95,115 @@ namespace CudaRasterizer
 			float* dL_drot,
 			bool debug,
 			const pybind11::dict &args = pybind11::dict());
+
+		
+
+
+		/////////////////////////////// Preprocess ///////////////////////////////
+
+
+
+		// Forward rendering procedure for differentiable rasterization
+		// of Gaussians.
+		static int preprocessForward(
+			float2* means2D,
+			float* depths,
+			int* radii,
+			float* cov3D,
+			float4* conic_opacity,
+			float* rgb,
+			bool* clamped,
+			uint32_t* tiles_touched,//the above are all per-Gaussian intemediate results.
+			const int P, int D, int M,
+			const int width, int height,
+			const float* means3D,
+			const float* scales,
+			const float* rotations,
+			const float* shs,
+			const float* opacities,//3dgs parameters
+			const float scale_modifier,
+			const float* viewmatrix,
+			const float* projmatrix,
+			const float* cam_pos,
+			const float tan_fovx, float tan_fovy,
+			const bool prefiltered,
+			bool debug,//raster_settings
+			const pybind11::dict &args);
+
+		static void preprocessBackward(
+			const int* radii,
+			const float* cov3D,
+			const bool* clamped,//the above are all per-Gaussian intemediate results.
+			const int P, int D, int M, int R,
+			const int width, int height,//rasterization setting.
+			const float* means3D,
+			const float* scales,
+			const float* rotations,
+			const float* shs,//input of this operator
+			const float scale_modifier,
+			const float* viewmatrix,
+			const float* projmatrix,
+			const float* campos,
+			const float tan_fovx, float tan_fovy,//rasterization setting.
+			const float* dL_dmean2D,
+			const float* dL_dconic,
+			float* dL_dcolor,//gradients of output of this operator
+			float* dL_dmean3D,
+			float* dL_dcov3D,
+			float* dL_dscale,
+			float* dL_drot,
+			float* dL_dsh,//gradients of input of this operator
+			bool debug,
+			const pybind11::dict &args);
+		
+
+
+		/////////////////////////////// Render ///////////////////////////////
+
+
+
+
+		static int renderForward(
+			std::function<char* (size_t)> geometryBuffer,
+			std::function<char* (size_t)> binningBuffer,
+			std::function<char* (size_t)> imageBuffer,
+			std::function<char* (size_t)> distBuffer,
+			const int P,
+			const float* background,
+			const int width, int height,
+			float2* means2D,//TODO: do I have to add const for it? However, internal means2D is not const type. 
+			float* depths,
+			int* radii,
+			float4* conic_opacity,
+			float* rgb,
+			uint32_t* tiles_touched,//# of touched Tiles by each Gaussian. Do not use const, because it will be updated in this function because of updateDistributedStatLocally.  
+			float* out_color,
+			int* n_render,// TODO: int* could not match with uint32_t*. error may occur, especially when the number is large.
+			int* n_consider,// If your uint32_t array contains values higher than 2,147,483,647, they will overflow when converted to int.
+			int* n_contrib,//array of results for this function. 
+			bool debug,
+			const pybind11::dict &args);
+
+		static void renderBackward(
+			const int P, int R,
+			const float* background,
+			const int width, int height,//rasterization settings. 
+			char* geom_buffer,
+			char* binning_buffer,
+			char* img_buffer,
+			char* dist_buffer,//buffer that contains intermedia results
+			const float* dL_dpix,//gradient of output
+			float* dL_dmean2D,
+			float* dL_dconic,
+			float* dL_dopacity,
+			float* dL_dcolor,//gradient of inputs
+			const float2* means2D,
+			const float4* conic_opacity,
+			const float* rgb,//inputs
+			bool debug,
+			const pybind11::dict &args);
+
+
 	};
 };
 

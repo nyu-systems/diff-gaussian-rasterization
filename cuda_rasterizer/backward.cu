@@ -357,7 +357,7 @@ __global__ void preprocessCUDA(
 	const glm::vec3* campos,
 	const float3* dL_dmean2D,
 	glm::vec3* dL_dmeans,
-	float* dL_dcolor,
+	float* dL_dcolor,//TODO: this should be change to const float*, because we do not modify dL_dcolor in preprocessCUDA backward. 
 	float* dL_dcov3D,
 	float* dL_dsh,
 	glm::vec3* dL_dscale,
