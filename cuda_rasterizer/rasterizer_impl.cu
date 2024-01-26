@@ -1672,7 +1672,7 @@ void CudaRasterizer::Rasterizer::renderBackward(
 	char* img_buffer,
 	char* dist_buffer,//buffer that contains intermedia results
 	const float* dL_dpix,//gradient of output
-	float* dL_dmean2D,
+	float* dL_dmean2D,//(P, 3)
 	float* dL_dconic,
 	float* dL_dopacity,
 	float* dL_dcolor,//gradient of inputs

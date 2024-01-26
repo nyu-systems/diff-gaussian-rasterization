@@ -233,6 +233,10 @@ class _PreprocessGaussians(torch.autograd.Function):
         ctx.num_rendered = num_rendered
         ctx.save_for_backward(means3D, scales, rotations, sh, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped, tiles_touched)
         ctx.mark_non_differentiable(radii, depths, tiles_touched)
+
+        # # TODO: double check. means2D is padded to (P, 3) in python. It is (P, 2) in cuda code.
+        # means2D_pad = torch.zeros((means2D.shape[0], 1), dtype = means2D.dtype, device = means2D.device)
+        # means2D = torch.cat((means2D, means2D_pad), dim = 1).contiguous()
         return means2D, rgb, conic_opacity, radii, depths, tiles_touched
 
     @staticmethod # TODO: gradient for conic_opacity is tricky. because cuda render backward generate dL_dconic and dL_dopacity sperately. 
@@ -244,6 +248,11 @@ class _PreprocessGaussians(torch.autograd.Function):
         raster_settings = ctx.raster_settings
         cuda_args = ctx.cuda_args
         means3D, scales, rotations, sh, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped, tiles_touched = ctx.saved_tensors
+
+        # change dL_dmeans2D from (P, 2) to (P, 3)
+        # grad_means2D is (P, 2) now. Need to pad it to (P, 3) because preprocess_gaussians_backward's cuda implementation.
+        grad_means2D_pad = torch.zeros((grad_means2D.shape[0], 1), dtype = grad_means2D.dtype, device = grad_means2D.device)
+        grad_means2D = torch.cat((grad_means2D, grad_means2D_pad), dim = 1).contiguous()
 
         # Restructure args as C++ method expects them
         args = (radii,
@@ -272,11 +281,11 @@ class _PreprocessGaussians(torch.autograd.Function):
         dL_dmeans3D, dL_dscales, dL_drotations, dL_dsh, dL_dopacity = _C.preprocess_gaussians_backward(*args)
 
         grads = (
-            dL_dmeans3D,
-            dL_dscales,
-            dL_drotations,
-            dL_dsh,
-            dL_dopacity,
+            dL_dmeans3D.contiguous(),
+            dL_dscales.contiguous(),
+            dL_drotations.contiguous(),
+            dL_dsh.contiguous(),
+            dL_dopacity.contiguous(),
             None,#raster_settings
             None,#raster_settings
         )
@@ -325,6 +334,14 @@ class _RenderGaussians(torch.autograd.Function):
         cuda_args,
     ):
 
+        # means2D = means2D[:,:2].contiguous()
+        # TODO: double check.
+        # means2D is padded to (P, 3) before being output from preprocess_gaussians.
+        # because _RenderGaussians.backward will give dL_dmeans2D with shape (P, 3).
+        # Here, because the means2D in cuda code is (P, 2), we need to remove the padding.
+        # Basically, means2D is (P, 3) in python. But it is (P, 2) in cuda code.
+        # dL_dmeans2D is alwayds (P, 3) in both python and cuda code.
+
         # Restructure arguments the way that the C++ lib expects them
         args = (
             raster_settings.bg,
@@ -348,6 +365,7 @@ class _RenderGaussians(torch.autograd.Function):
         ctx.num_rendered = num_rendered
         ctx.save_for_backward(means2D, conic_opacity, rgb, geomBuffer, binningBuffer, imgBuffer, distBuffer)
         ctx.mark_non_differentiable(n_render, n_consider, n_contrib)
+
         return color, n_render, n_consider, n_contrib
 
     @staticmethod
@@ -376,10 +394,14 @@ class _RenderGaussians(torch.autograd.Function):
 
         dL_dmeans2D, dL_dconic_opacity, dL_dcolors = _C.render_gaussians_backward(*args)
 
+        # change dL_dmeans2D from (P, 3) to (P, 2)
+        # dL_dmeans2D is now (P, 3) because of render backwards' cuda implementation.
+        dL_dmeans2D = dL_dmeans2D[:,:2]
+
         grads = (
-            dL_dmeans2D,
-            dL_dconic_opacity,
-            dL_dcolors,
+            dL_dmeans2D.contiguous(),
+            dL_dconic_opacity.contiguous(),
+            dL_dcolors.contiguous(),
             None,
             None,
             None,
@@ -493,3 +515,35 @@ class GaussianRasterizer(nn.Module):
             raster_settings,
             cuda_args
         )
+
+    def get_local2j_ids(self, means2D, radii, cuda_args):
+
+        raster_settings = self.raster_settings
+        world_size = int(cuda_args["world_size"])
+        local_rank = int(cuda_args["local_rank"])
+
+        # TODO: make it more general.
+        dist_global_strategy = [int(x) for x in cuda_args["dist_global_strategy"].split(",")]
+        assert len(dist_global_strategy) == world_size+1, "dist_global_strategy should have length WORLD_SIZE+1"
+        assert dist_global_strategy[0] == 0, "dist_global_strategy[0] should be 0"
+        dist_global_strategy = torch.tensor(dist_global_strategy, dtype=torch.int, device=means2D.device)
+
+        args = (
+            raster_settings.image_height,
+            raster_settings.image_width,
+            local_rank,
+            world_size,
+            means2D,
+            radii,
+            dist_global_strategy,
+            cuda_args
+        )
+
+        local2j_ids_bool = _C.get_local2j_ids_bool(*args) # local2j_ids_bool is (P, world_size) bool tensor
+
+        local2j_ids = []
+        for rk in range(world_size):
+            local2j_ids.append(local2j_ids_bool[:, rk].nonzero().squeeze())
+
+        return local2j_ids
+

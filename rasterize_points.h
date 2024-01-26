@@ -158,3 +158,19 @@ RenderGaussiansBackwardCUDA(
 	const torch::Tensor& rgb,
 	const bool debug,
 	const pybind11::dict &args);
+
+
+
+/////////////////////////////// Utility tools ///////////////////////////////
+
+
+
+torch::Tensor GetLocal2jIdsBoolCUDA(
+	int image_height,
+	int image_width,
+	int local_rank,
+	int world_size,
+	const torch::Tensor& means2D,
+	const torch::Tensor& radii,
+	const torch::Tensor& dist_global_strategy,
+	const pybind11::dict &args);

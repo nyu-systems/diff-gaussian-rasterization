@@ -25,6 +25,9 @@
 #include <string>
 #include <functional>
 
+#include <cooperative_groups.h>
+namespace cg = cooperative_groups;
+
 std::function<char*(size_t N)> resizeFunctional(torch::Tensor& t) {
     auto lambda = [&t](size_t N) {
         t.resize_({(long long)N});
@@ -267,8 +270,8 @@ PreprocessGaussiansCUDA(
 	const int H = image_height;
 	const int W = image_width;
 
-	// of shape (P, 3) because in original 3dgs implement, it is (P, 3)
-	torch::Tensor means2D = torch::full({P, 3}, 0.0, means3D.options());//TODO: what about require_grads?
+	// of shape (P, 2). means2D is (P, 2) in cuda. It will be converted to (P, 3) when is sent back to python to meet torch graph's requirement.
+	torch::Tensor means2D = torch::full({P, 2}, 0.0, means3D.options());//TODO: what about require_grads?
 	// of shape (P)
 	torch::Tensor depths = torch::full({P}, 0.0, means3D.options());
 	// of shape (P)
@@ -344,7 +347,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     const int image_width,
 	const int degree,
 	const torch::Tensor& campos,//rasterization setting.
-	const torch::Tensor& dL_dmeans2D,
+	const torch::Tensor& dL_dmeans2D,// (P, 3)
 	const torch::Tensor& dL_dconic_opacity,
 	const torch::Tensor& dL_dcolors,//gradients of output of this operator
 	const int R,
@@ -423,7 +426,7 @@ RenderGaussiansCUDA(
 	const torch::Tensor& background,
     const int image_height,
     const int image_width,// image setting
-	torch::Tensor& means2D,
+	torch::Tensor& means2D,// (P, 2)
 	torch::Tensor& depths,
 	torch::Tensor& radii,
 	torch::Tensor& conic_opacity,
@@ -495,7 +498,7 @@ RenderGaussiansBackwardCUDA(
 	const torch::Tensor& imageBuffer,
 	const torch::Tensor& distBuffer,
     const torch::Tensor& dL_dout_color,
-	const torch::Tensor& means2D,
+	const torch::Tensor& means2D,// (P, 2)
 	const torch::Tensor& conic_opacity,
 	const torch::Tensor& rgb,
 	const bool debug,
@@ -545,4 +548,79 @@ RenderGaussiansBackwardCUDA(
   //TODO: in pytorch, when the reference to a tensor decreases to 0, the memory will be freed.
   //But what will happen to libtorch?
   return std::make_tuple(dL_dmeans2D, dL_dconic_opacity, dL_dcolors);
+}
+
+/////////////////////////////// Utility tools ///////////////////////////////
+
+__global__ void getTouchedIdsBool(
+	int P,
+	int height,
+	int width,
+	int world_size,
+	const float2* means2D,
+	const int* radii,// NOTE: radii is not const in getRect()
+	const int* dist_global_strategy,
+	bool* touchedIdsBool)
+{
+	auto i = cg::this_grid().thread_rank();
+	if (i < P)
+	{
+		uint2 rect_min, rect_max;
+		dim3 tile_grid((width + BLOCK_X - 1) / BLOCK_X, (height + BLOCK_Y - 1) / BLOCK_Y, 1);
+
+		getRect(means2D[i], radii[i], rect_min, rect_max, tile_grid);
+		
+		// method 1:
+		int touched_min_tile_idx = rect_min.y * tile_grid.x + rect_min.x;
+		int touched_max_tile_idx = (rect_max.y - 1 ) * tile_grid.x + rect_max.x - 1;
+
+		if ( touched_max_tile_idx < touched_min_tile_idx )
+			return;
+			
+		for (int rk = 0; rk < world_size; rk++)
+		{
+			int tile_l = *(dist_global_strategy+rk);
+			int tile_r = *(dist_global_strategy+rk+1);
+
+			if (touched_max_tile_idx < tile_l || touched_min_tile_idx >= tile_r)
+				continue;
+			
+			// TODO: If one worker's tiles are fewer than one row, then it is buggy. 
+			// If we have other workload_division dimension, then we need to change this. 
+			touchedIdsBool[i * world_size + rk] = true;
+		}
+		
+
+		
+	}
+}
+
+torch::Tensor GetLocal2jIdsBoolCUDA(
+	int image_height,
+	int image_width,
+	int local_rank,
+	int world_size,
+	const torch::Tensor& means2D,
+	const torch::Tensor& radii,
+	const torch::Tensor& dist_global_strategy,
+	const pybind11::dict &args)
+{	
+	const int P = means2D.size(0);
+	const int H = image_height;
+	const int W = image_width;
+
+	torch::Tensor local2jIdsBool = torch::full({P, world_size}, false, means2D.options().dtype(torch::kBool));
+
+	getTouchedIdsBool << <(P + 255) / 256, 256 >> >(
+		P,
+		H,
+		W,
+		world_size,
+		reinterpret_cast<float2*>(means2D.contiguous().data<float>()),
+		radii.contiguous().data<int>(),
+		dist_global_strategy.contiguous().data<int>(),
+		local2jIdsBool.contiguous().data<bool>()
+	);
+
+	return local2jIdsBool;
 }
