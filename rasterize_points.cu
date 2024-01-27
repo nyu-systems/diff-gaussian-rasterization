@@ -242,7 +242,7 @@ torch::Tensor markVisible(
 
 /////////////////////////////// Preprocess ///////////////////////////////
 
-std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 PreprocessGaussiansCUDA(
 	const torch::Tensor& means3D,
 	const torch::Tensor& scales,
@@ -284,9 +284,6 @@ PreprocessGaussiansCUDA(
 	torch::Tensor rgb = torch::full({P, 3}, 0.0, means3D.options());
 	// of shape (P)
 	torch::Tensor clamped = torch::full({P, 3}, false, means3D.options().dtype(at::kBool));
-	// of shape (P)
-	torch::Tensor tiles_touched = torch::full({P}, 0, means3D.options().dtype(torch::kInt32));
-	//TODO: check uint or int? the internal implement is using unit32_t, it is not compatible for now. 
 	//TODO: compare to original GeometryState implementation, this one does not explicitly do gpu memory alignment. 
 	//That may lead to problems. However, pytorch does implicit memory alignment.
 
@@ -307,7 +304,6 @@ PreprocessGaussiansCUDA(
 			reinterpret_cast<float4*>(conic_opacity.contiguous().data<float>()),
 			rgb.contiguous().data<float>(),
 			clamped.contiguous().data<bool>(),
-			reinterpret_cast<uint32_t*>(tiles_touched.contiguous().data<int>()),//TODO: there could be a problem when cast to uint32_t from int.
 			P, degree, M,
 			W, H,
 			means3D.contiguous().data<float>(),
@@ -325,7 +321,7 @@ PreprocessGaussiansCUDA(
 			debug,
 			args);
 	}
-	return std::make_tuple(rendered, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped, tiles_touched);
+	return std::make_tuple(rendered, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped);
 }
 
 
@@ -430,8 +426,7 @@ RenderGaussiansCUDA(
 	torch::Tensor& depths,
 	torch::Tensor& radii,
 	torch::Tensor& conic_opacity,
-	torch::Tensor& rgb,
-	torch::Tensor& tiles_touched,//3dgs intermediate results
+	torch::Tensor& rgb,//3dgs intermediate results
 	const bool debug,
 	const pybind11::dict &args)
 {
@@ -477,8 +472,7 @@ RenderGaussiansCUDA(
 		depths.contiguous().data<float>(),
 		radii.contiguous().data<int>(),
 		reinterpret_cast<float4*>(conic_opacity.contiguous().data<float>()),
-		rgb.contiguous().data<float>(),
-		reinterpret_cast<uint32_t*>(tiles_touched.contiguous().data<int>()),//3dgs intermediate results
+		rgb.contiguous().data<float>(),//3dgs intermediate results
 		out_color.contiguous().data<float>(),
 		n_render.contiguous().data<int>(),
 		n_consider.contiguous().data<int>(),

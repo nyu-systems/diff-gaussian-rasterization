@@ -40,7 +40,7 @@ namespace CudaRasterizer
 		uint32_t* point_offsets;
 		uint32_t* tiles_touched;
 
-		static GeometryState fromChunk(char*& chunk, size_t P);
+		static GeometryState fromChunk(char*& chunk, size_t P, bool sep_rendering);
 	};
 
 	struct ImageState

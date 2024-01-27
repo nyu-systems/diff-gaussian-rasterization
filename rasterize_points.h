@@ -77,7 +77,7 @@ torch::Tensor markVisible(
 
 
 
-std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 PreprocessGaussiansCUDA(
 	const torch::Tensor& means3D,
 	const torch::Tensor& scales,
@@ -139,8 +139,7 @@ RenderGaussiansCUDA(
 	torch::Tensor& depths,
 	torch::Tensor& radii,
 	torch::Tensor& conic_opacity,
-	torch::Tensor& rgb,
-	torch::Tensor& tiles_touched,//3dgs intermediate results
+	torch::Tensor& rgb,//3dgs intermediate results
 	const bool debug,
 	const pybind11::dict &args);
 

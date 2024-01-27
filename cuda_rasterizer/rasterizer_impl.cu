@@ -160,16 +160,19 @@ void CudaRasterizer::Rasterizer::markVisible(
 		present);
 }
 
-CudaRasterizer::GeometryState CudaRasterizer::GeometryState::fromChunk(char*& chunk, size_t P)
+CudaRasterizer::GeometryState CudaRasterizer::GeometryState::fromChunk(char*& chunk, size_t P, bool sep_rendering=false)
 {
 	GeometryState geom;
-	obtain(chunk, geom.depths, P, 128);
-	obtain(chunk, geom.clamped, P * 3, 128);
-	obtain(chunk, geom.internal_radii, P, 128);
-	obtain(chunk, geom.means2D, P, 128);
-	obtain(chunk, geom.cov3D, P * 6, 128);
-	obtain(chunk, geom.conic_opacity, P, 128);
-	obtain(chunk, geom.rgb, P * 3, 128);
+	if (!sep_rendering)
+	{
+		obtain(chunk, geom.depths, P, 128);
+		obtain(chunk, geom.clamped, P * 3, 128);
+		obtain(chunk, geom.internal_radii, P, 128);
+		obtain(chunk, geom.means2D, P, 128);
+		obtain(chunk, geom.cov3D, P * 6, 128);
+		obtain(chunk, geom.conic_opacity, P, 128);
+		obtain(chunk, geom.rgb, P * 3, 128);
+	}
 	obtain(chunk, geom.tiles_touched, P, 128);
 	cub::DeviceScan::InclusiveSum(nullptr, geom.scan_size, geom.tiles_touched, geom.tiles_touched, P);
 	// no work is done and the required allocation size is returned in geom.scan_size.
@@ -380,6 +383,7 @@ __global__ void getGlobalGaussianOnTiles(//TODO: maybe this could take significa
 	}
 }
 
+// NOTE: This method should also deal with world_size == 1 safely.
 void updateDistributedStatLocally(//TODO: optimize implementations for all these kernels. 
 	const int P,
 	const int width,
@@ -387,7 +391,6 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 	const dim3 tile_grid,
 	int* radii,
 	float2* means2D,
-	uint32_t* tiles_touched,
 	CudaRasterizer::DistributedState& distState,
 	const int local_rank,
 	const int world_size,
@@ -500,24 +503,10 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 			// printf("division_mode: %s is not supported.\n", dist_division_mode);
 		}
 		timer.stop("23 updateDistributedStatLocally.getComputeLocally");
-
-
 	}
 	else {
 		cudaMemset(distState.compute_locally, true, tile_num * sizeof(bool));
 	}
-
-	timer.start("24 updateDistributedStatLocally.updateTileTouched");
-	// set tiles_touched[i] to 0 if compute_locally[i] is false.
-	updateTileTouched <<<(P + 255) / 256, 256 >>> (
-		P,
-		tile_grid,
-		radii,
-		means2D,
-		tiles_touched,
-		distState.compute_locally
-	);
-	timer.stop("24 updateDistributedStatLocally.updateTileTouched");
 }
 
 void save_log_in_file(int iteration, int local_rank, int world_size, const char* log_folder, const char* filename_prefix, const char* log_content) {
@@ -649,27 +638,36 @@ int CudaRasterizer::Rasterizer::forward(
 	size_t dist_chunk_size = required<DistributedState>(tile_grid.x * tile_grid.y);
 	char* dist_chunkptr = distBuffer(dist_chunk_size);
 	DistributedState distState = DistributedState::fromChunk(dist_chunkptr, tile_grid.x * tile_grid.y);
+
 	// Use geomState.means2D and radii to decide how to evenly distribute the workloads. 
 	timer.start("20 updateDistributedStatLocally");
-	if (world_size >= 1) {
-		updateDistributedStatLocally(
-			P,
-			width,
-			height,
-			tile_grid,
-			radii,
-			geomState.means2D,
-			geomState.tiles_touched,
-			distState,
-			local_rank,
-			world_size,
-			dist_division_mode,
-			timer
-		);
-	} else {
-		cudaMemset(distState.compute_locally, true, tile_num * sizeof(bool));
-	}
+	updateDistributedStatLocally(
+		P,
+		width,
+		height,
+		tile_grid,
+		radii,
+		geomState.means2D,
+		distState,
+		local_rank,
+		world_size,
+		dist_division_mode,
+		timer
+	);
 	timer.stop("20 updateDistributedStatLocally");
+
+	timer.start("24 updateDistributedStatLocally.updateTileTouched");
+	// set tiles_touched[i] to 0 if compute_locally[i] is false.
+	updateTileTouched <<<(P + 255) / 256, 256 >>> (
+		P,
+		tile_grid,
+		radii,
+		geomState.means2D,
+		geomState.tiles_touched,
+		distState.compute_locally
+	);
+	timer.stop("24 updateDistributedStatLocally.updateTileTouched");
+
 
 	// CHECK_CUDA(, debug)
 	// Compute prefix sum over full list of touched tile counts by Gaussians
@@ -1107,8 +1105,7 @@ int CudaRasterizer::Rasterizer::preprocessForward(
 	float* cov3D,
 	float4* conic_opacity,
 	float* rgb,
-	bool* clamped,
-	uint32_t* tiles_touched,//the above are all per-Gaussian intemediate results.
+	bool* clamped,//the above are all per-Gaussian intemediate results.
 	const int P, int D, int M,
 	const int width, int height,
 	const float* means3D,
@@ -1161,6 +1158,13 @@ int CudaRasterizer::Rasterizer::preprocessForward(
 	dim3 block(BLOCK_X, BLOCK_Y, 1);
 	int tile_num = tile_grid.x * tile_grid.y;
 
+	// allocate temporary buffer for tiles_touched.
+	// In sep_rendering==True case, we will compute tiles_touched in the renderForward. 
+	// TODO: remove it later by modifying FORWARD::preprocess when we deprecate sep_rendering==False case
+	uint32_t* tiles_touched_temp_buffer;
+	CHECK_CUDA(cudaMalloc(&tiles_touched_temp_buffer, P * sizeof(uint32_t)), debug);
+	CHECK_CUDA(cudaMemset(tiles_touched_temp_buffer, 0, P * sizeof(uint32_t)), debug);
+
 	timer.start("10 preprocess");
 	// Run preprocessing per-Gaussian (transformation, bounding, conversion of SHs to RGB)
 	CHECK_CUDA(FORWARD::preprocess(
@@ -1186,7 +1190,7 @@ int CudaRasterizer::Rasterizer::preprocessForward(
 		rgb,
 		conic_opacity,
 		tile_grid,
-		tiles_touched,
+		tiles_touched_temp_buffer,
 		prefiltered,
 		local_rank,
 		world_size
@@ -1200,6 +1204,8 @@ int CudaRasterizer::Rasterizer::preprocessForward(
 		timer.printAllTimes(iteration, world_size, local_rank, log_folder);
 	}
 	delete log_tmp;
+	// free temporary buffer for tiles_touched. TODO: remove it. 
+	CHECK_CUDA(cudaFree(tiles_touched_temp_buffer), debug);
 	return num_rendered;
 }
 
@@ -1302,7 +1308,6 @@ int CudaRasterizer::Rasterizer::renderForward(
 	int* radii,
 	float4* conic_opacity,
 	float* rgb,
-	uint32_t* tiles_touched,//# of touched Tiles by each Gaussian. Do not use const, because it will be updated in this function because of updateDistributedStatLocally.  
 	float* out_color,
 	int* n_render,// TODO: int* could not match with uint32_t*. error may occur, especially when the number is large.
 	int* n_consider,// If your uint32_t array contains values higher than 2,147,483,647, they will overflow when converted to int.
@@ -1342,7 +1347,7 @@ int CudaRasterizer::Rasterizer::renderForward(
 
 	size_t chunk_size = required<GeometryState>(P);
 	char* chunkptr = geometryBuffer(chunk_size);
-	GeometryState geomState = GeometryState::fromChunk(chunkptr, P); //TODO: there are some extra memory allocation here. Optimize it later.
+	GeometryState geomState = GeometryState::fromChunk(chunkptr, P, true); // do not allocate extra memory here if sep_rendering==True.
 
 	dim3 tile_grid((width + BLOCK_X - 1) / BLOCK_X, (height + BLOCK_Y - 1) / BLOCK_Y, 1);
 	dim3 block(BLOCK_X, BLOCK_Y, 1);
@@ -1358,30 +1363,37 @@ int CudaRasterizer::Rasterizer::renderForward(
 	DistributedState distState = DistributedState::fromChunk(dist_chunkptr, tile_grid.x * tile_grid.y);
 	// Use means2D and radii to decide how to evenly distribute the workloads. 
 	timer.start("20 updateDistributedStatLocally");
-	if (world_size >= 1) {
-		updateDistributedStatLocally(
-			P,
-			width,
-			height,
-			tile_grid,
-			radii,
-			means2D,
-			tiles_touched,
-			distState,
-			local_rank,
-			world_size,
-			dist_division_mode,
-			timer
-		);
-	} else {
-		cudaMemset(distState.compute_locally, true, tile_num * sizeof(bool));
-	}
+	updateDistributedStatLocally(
+		P,
+		width,
+		height,
+		tile_grid,
+		radii,
+		means2D,
+		distState,
+		local_rank,
+		world_size,
+		dist_division_mode,
+		timer
+	);
 	timer.stop("20 updateDistributedStatLocally");
+	
+	timer.start("24 updateDistributedStatLocally.updateTileTouched");
+	// For sep_rendering==True case (here), we only compute tiles_touched in the renderForward.
+	updateTileTouched <<<(P + 255) / 256, 256 >>> (
+		P,
+		tile_grid,
+		radii,
+		means2D,
+		geomState.tiles_touched,
+		distState.compute_locally
+	);
+	timer.stop("24 updateDistributedStatLocally.updateTileTouched");
 
 	// Compute prefix sum over full list of touched tile counts by Gaussians
 	// E.g., [2, 3, 0, 2, 1] -> [2, 5, 5, 7, 8]
 	timer.start("30 InclusiveSum");
-	CHECK_CUDA(cub::DeviceScan::InclusiveSum(geomState.scanning_space, geomState.scan_size, tiles_touched, geomState.point_offsets, P), debug)
+	CHECK_CUDA(cub::DeviceScan::InclusiveSum(geomState.scanning_space, geomState.scan_size, geomState.tiles_touched, geomState.point_offsets, P), debug)
 	timer.stop("30 InclusiveSum");
 
 	// Retrieve total number of Gaussian instances to launch and resize aux buffers
@@ -1700,7 +1712,6 @@ void CudaRasterizer::Rasterizer::renderBackward(
 
 	MyTimerOnGPU timer;
 
-	GeometryState geomState = GeometryState::fromChunk(geom_buffer, P);//TODO: it is not used.
 	BinningState binningState = BinningState::fromChunk(binning_buffer, R);
 	ImageState imgState = ImageState::fromChunk(img_buffer, width * height);
 

@@ -112,8 +112,7 @@ namespace CudaRasterizer
 			float* cov3D,
 			float4* conic_opacity,
 			float* rgb,
-			bool* clamped,
-			uint32_t* tiles_touched,//the above are all per-Gaussian intemediate results.
+			bool* clamped,//the above are all per-Gaussian intemediate results.
 			const int P, int D, int M,
 			const int width, int height,
 			const float* means3D,
@@ -176,7 +175,6 @@ namespace CudaRasterizer
 			int* radii,
 			float4* conic_opacity,
 			float* rgb,
-			uint32_t* tiles_touched,//# of touched Tiles by each Gaussian. Do not use const, because it will be updated in this function because of updateDistributedStatLocally.  
 			float* out_color,
 			int* n_render,// TODO: int* could not match with uint32_t*. error may occur, especially when the number is large.
 			int* n_consider,// If your uint32_t array contains values higher than 2,147,483,647, they will overflow when converted to int.

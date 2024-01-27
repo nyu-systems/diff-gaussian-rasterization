@@ -225,29 +225,29 @@ class _PreprocessGaussians(torch.autograd.Function):
         )
 
         # TODO: update this. 
-        num_rendered, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped, tiles_touched = _C.preprocess_gaussians(*args)
+        num_rendered, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped = _C.preprocess_gaussians(*args)
 
         # Keep relevant tensors for backward
         ctx.raster_settings = raster_settings
         ctx.cuda_args = cuda_args
         ctx.num_rendered = num_rendered
-        ctx.save_for_backward(means3D, scales, rotations, sh, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped, tiles_touched)
-        ctx.mark_non_differentiable(radii, depths, tiles_touched)
+        ctx.save_for_backward(means3D, scales, rotations, sh, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped)
+        ctx.mark_non_differentiable(radii, depths)
 
         # # TODO: double check. means2D is padded to (P, 3) in python. It is (P, 2) in cuda code.
         # means2D_pad = torch.zeros((means2D.shape[0], 1), dtype = means2D.dtype, device = means2D.device)
         # means2D = torch.cat((means2D, means2D_pad), dim = 1).contiguous()
-        return means2D, rgb, conic_opacity, radii, depths, tiles_touched
+        return means2D, rgb, conic_opacity, radii, depths
 
     @staticmethod # TODO: gradient for conic_opacity is tricky. because cuda render backward generate dL_dconic and dL_dopacity sperately. 
-    def backward(ctx, grad_means2D, grad_rgb, grad_conic_opacity, grad_radii, grad_depths, grad_tiles_touched):
-        # grad_radii, grad_depths, grad_tiles_touched should be all None. 
+    def backward(ctx, grad_means2D, grad_rgb, grad_conic_opacity, grad_radii, grad_depths):
+        # grad_radii, grad_depths should be all None. 
 
         # Restore necessary values from context
         num_rendered = ctx.num_rendered
         raster_settings = ctx.raster_settings
         cuda_args = ctx.cuda_args
-        means3D, scales, rotations, sh, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped, tiles_touched = ctx.saved_tensors
+        means3D, scales, rotations, sh, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped = ctx.saved_tensors
 
         # change dL_dmeans2D from (P, 2) to (P, 3)
         # grad_means2D is (P, 2) now. Need to pad it to (P, 3) because preprocess_gaussians_backward's cuda implementation.
@@ -305,7 +305,6 @@ def render_gaussians(
     rgb,
     depths,
     radii,
-    tiles_touched,
     raster_settings,
     cuda_args,
 ):
@@ -315,7 +314,6 @@ def render_gaussians(
         rgb,
         depths,
         radii,
-        tiles_touched,
         raster_settings,
         cuda_args,
     )
@@ -329,7 +327,6 @@ class _RenderGaussians(torch.autograd.Function):
         rgb,
         depths,
         radii,
-        tiles_touched,
         raster_settings,
         cuda_args,
     ):
@@ -351,8 +348,7 @@ class _RenderGaussians(torch.autograd.Function):
             depths,
             radii,
             conic_opacity,
-            rgb,
-            tiles_touched,# 3dgs intermediate results
+            rgb,# 3dgs intermediate results
             raster_settings.debug,
             cuda_args
         )
@@ -500,7 +496,7 @@ class GaussianRasterizer(nn.Module):
             raster_settings,
             cuda_args)
 
-    def render_gaussians(self, means2D, conic_opacity, rgb, depths, radii, tiles_touched, cuda_args = None):
+    def render_gaussians(self, means2D, conic_opacity, rgb, depths, radii, cuda_args = None):
 
         raster_settings = self.raster_settings
 
@@ -511,7 +507,6 @@ class GaussianRasterizer(nn.Module):
             rgb,
             depths,
             radii,
-            tiles_touched,
             raster_settings,
             cuda_args
         )
