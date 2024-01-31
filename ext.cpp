@@ -18,6 +18,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("mark_visible", &markVisible);
   m.def("preprocess_gaussians", &PreprocessGaussiansCUDA);
   m.def("preprocess_gaussians_backward", &PreprocessGaussiansBackwardCUDA);
+  m.def("get_distribution_strategy", &GetDistributionStrategyCUDA);
   m.def("render_gaussians", &RenderGaussiansCUDA);
   m.def("render_gaussians_backward", &RenderGaussiansBackwardCUDA);
   m.def("get_local2j_ids_bool", &GetLocal2jIdsBoolCUDA);

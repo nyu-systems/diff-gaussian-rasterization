@@ -206,14 +206,15 @@ CudaRasterizer::BinningState CudaRasterizer::BinningState::fromChunk(char*& chun
 	return binning;
 }
 
-CudaRasterizer::DistributedState CudaRasterizer::DistributedState::fromChunk(char*& chunk, size_t tile_num)
+CudaRasterizer::DistributedState CudaRasterizer::DistributedState::fromChunk(char*& chunk, size_t tile_num, bool sep_rendering=false)
 {
 	DistributedState dist;
 	obtain(chunk, dist.gs_on_tiles, tile_num, 128);
 	obtain(chunk, dist.gs_on_tiles_offsets, tile_num, 128);
 	cub::DeviceScan::InclusiveSum(nullptr, dist.scan_size, dist.gs_on_tiles, dist.gs_on_tiles_offsets, tile_num);
 	obtain(chunk, dist.scanning_space, dist.scan_size, 128);
-	obtain(chunk, dist.compute_locally, tile_num, 128);
+	if (!sep_rendering)
+		obtain(chunk, dist.compute_locally, tile_num, 128);
 	return dist;
 }
 
@@ -1290,6 +1291,112 @@ void CudaRasterizer::Rasterizer::preprocessBackward(
 
 
 
+
+/////////////////////////////// GetDistributionStrategy ///////////////////////////////
+
+void CudaRasterizer::Rasterizer::getDistributionStrategy(
+	std::function<char* (size_t)> distBuffer,
+	const int P,
+	const int width, int height,
+	float2* means2D,
+	int* radii,
+	bool* compute_locally,
+	bool debug,
+	const pybind11::dict &args)
+{
+	std::string mode = args["mode"].cast<std::string>();//"train", "test"
+	std::string local_rank_str = args["local_rank"].cast<std::string>();
+	std::string world_size_str = args["world_size"].cast<std::string>();
+	std::string iteration_str = args["iteration"].cast<std::string>();
+	std::string log_interval_str = args["log_interval"].cast<std::string>();
+	std::string log_folder_str = args["log_folder"].cast<std::string>();
+	std::string zhx_debug_str = args["zhx_debug"].cast<std::string>();// "True", "False"
+	std::string zhx_time_str = args["zhx_time"].cast<std::string>();// "True", "False"
+	std::string dist_division_mode_str = args["dist_division_mode"].cast<std::string>();
+	int local_rank = std::stoi(local_rank_str);
+	int world_size = std::stoi(world_size_str);
+	int iteration = std::stoi(iteration_str);
+	int log_interval = std::stoi(log_interval_str);
+	bool zhx_debug = zhx_debug_str == "True";
+	bool zhx_time = zhx_time_str == "True";
+	const char* dist_division_mode = dist_division_mode_str.c_str();
+	const char* log_folder = log_folder_str.c_str();
+	// print out the environment variables
+
+	char* log_tmp = new char[500];
+
+	MyTimerOnGPU timer;
+
+	dim3 tile_grid((width + BLOCK_X - 1) / BLOCK_X, (height + BLOCK_Y - 1) / BLOCK_Y, 1);
+	int tile_num = tile_grid.x * tile_grid.y;
+
+	size_t dist_chunk_size = required<DistributedState>(tile_grid.x * tile_grid.y);
+	char* dist_chunkptr = distBuffer(dist_chunk_size);
+	DistributedState distState = DistributedState::fromChunk(dist_chunkptr, tile_grid.x * tile_grid.y, true);
+
+	distState.compute_locally = compute_locally;
+	// NOTE: do not allocate memory for distState.compute_locally in fromChunk for sep_rendering mode, 
+	// but use the compute_locally from python.
+
+	// Use means2D and radii to decide how to evenly distribute the workloads. 
+	timer.start("20 updateDistributedStatLocally");
+	updateDistributedStatLocally(// NOTE: in memory_distribution mode, this function's calculation is not correct.
+		P,
+		width,
+		height,
+		tile_grid,
+		radii,
+		means2D,
+		distState,
+		local_rank,
+		world_size,
+		dist_division_mode,
+		timer
+	);
+	timer.stop("20 updateDistributedStatLocally");
+	
+	// DEBUG: print out compute_locally	information
+	if (mode == "train" && zhx_debug && iteration % log_interval == 1) {
+		int last_local_num_rendered_end = distState.last_local_num_rendered_end;
+		int local_num_rendered_end = distState.local_num_rendered_end;
+		uint32_t* gs_on_tiles_cpu = new uint32_t[tile_grid.x * tile_grid.y];
+		CHECK_CUDA(cudaMemcpy(gs_on_tiles_cpu, distState.gs_on_tiles, tile_grid.x * tile_grid.y * sizeof(uint32_t), cudaMemcpyDeviceToHost), debug);
+
+		// distState.compute_locally to cpu
+		bool* compute_locally_cpu = new bool[tile_grid.x * tile_grid.y];
+		CHECK_CUDA(cudaMemcpy(compute_locally_cpu, distState.compute_locally, tile_grid.x * tile_grid.y * sizeof(bool), cudaMemcpyDeviceToHost), debug);
+
+		int num_local_tiles = 0;
+		int local_tiles_left_idx = 999999999;
+		int local_tiles_right_idx = 0;
+		int num_rendered_from_distState = 0;
+		for (int i = 0; i < tile_grid.x * tile_grid.y; i++)
+		{
+			if (compute_locally_cpu[i])
+			{
+				if (local_tiles_left_idx == 999999999)
+					local_tiles_left_idx = i;
+				local_tiles_right_idx = i;
+				num_local_tiles++;
+				num_rendered_from_distState += (int)gs_on_tiles_cpu[i];
+			}
+		}
+
+		sprintf(log_tmp, "num_local_tiles: %d, local_tiles_left_idx: %d, local_tiles_right_idx: %d, last_local_num_rendered_end: %d, local_num_rendered_end: %d, num_rendered_from_distState: %d", (int)num_local_tiles, (int)local_tiles_left_idx, (int)local_tiles_right_idx, (int)last_local_num_rendered_end, (int)local_num_rendered_end, (int)num_rendered_from_distState);
+		save_log_in_file(iteration, local_rank, world_size, log_folder, "num_rendered", log_tmp);
+
+		delete[] compute_locally_cpu;
+		delete[] gs_on_tiles_cpu;
+	}
+
+	// Print out timing information
+	if (zhx_time && iteration % log_interval == 1) {
+		timer.printAllTimes(iteration, world_size, local_rank, log_folder);
+	}
+
+	delete[] log_tmp;
+}
+
 /////////////////////////////// Render ///////////////////////////////
 
 
@@ -1299,7 +1406,6 @@ int CudaRasterizer::Rasterizer::renderForward(
 	std::function<char* (size_t)> geometryBuffer,
 	std::function<char* (size_t)> binningBuffer,
 	std::function<char* (size_t)> imageBuffer,
-	std::function<char* (size_t)> distBuffer,
 	const int P,
 	const float* background,
 	const int width, int height,
@@ -1308,6 +1414,7 @@ int CudaRasterizer::Rasterizer::renderForward(
 	int* radii,
 	float4* conic_opacity,
 	float* rgb,
+	bool* compute_locally,
 	float* out_color,
 	int* n_render,// TODO: int* could not match with uint32_t*. error may occur, especially when the number is large.
 	int* n_consider,// If your uint32_t array contains values higher than 2,147,483,647, they will overflow when converted to int.
@@ -1358,26 +1465,6 @@ int CudaRasterizer::Rasterizer::renderForward(
 	char* img_chunkptr = imageBuffer(img_chunk_size);
 	ImageState imgState = ImageState::fromChunk(img_chunkptr, width * height);
 
-	size_t dist_chunk_size = required<DistributedState>(tile_grid.x * tile_grid.y);
-	char* dist_chunkptr = distBuffer(dist_chunk_size);
-	DistributedState distState = DistributedState::fromChunk(dist_chunkptr, tile_grid.x * tile_grid.y);
-	// Use means2D and radii to decide how to evenly distribute the workloads. 
-	timer.start("20 updateDistributedStatLocally");
-	updateDistributedStatLocally(
-		P,
-		width,
-		height,
-		tile_grid,
-		radii,
-		means2D,
-		distState,
-		local_rank,
-		world_size,
-		dist_division_mode,
-		timer
-	);
-	timer.stop("20 updateDistributedStatLocally");
-	
 	timer.start("24 updateDistributedStatLocally.updateTileTouched");
 	// For sep_rendering==True case (here), we only compute tiles_touched in the renderForward.
 	updateTileTouched <<<(P + 255) / 256, 256 >>> (
@@ -1386,7 +1473,7 @@ int CudaRasterizer::Rasterizer::renderForward(
 		radii,
 		means2D,
 		geomState.tiles_touched,
-		distState.compute_locally
+		compute_locally
 	);
 	timer.stop("24 updateDistributedStatLocally.updateTileTouched");
 
@@ -1415,7 +1502,7 @@ int CudaRasterizer::Rasterizer::renderForward(
 		binningState.point_list_keys_unsorted,
 		binningState.point_list_unsorted,
 		radii,
-		distState.compute_locally,
+		compute_locally,
 		tile_grid,
 		local_rank,
 		world_size)
@@ -1516,7 +1603,7 @@ int CudaRasterizer::Rasterizer::renderForward(
 		imgState.accum_alpha,
 		imgState.n_contrib,
 		imgState.n_contrib2loss,
-		distState.compute_locally,
+		compute_locally,
 		background,
 		out_color), debug)
 	timer.stop("70 render");
@@ -1536,7 +1623,7 @@ int CudaRasterizer::Rasterizer::renderForward(
 		width, height,
 		imgState.n_contrib,
 		n_consider,
-		distState.compute_locally
+		compute_locally
 	);
 	timer.stop("82 sum_n_consider");
 	timer.start("83 sum_n_contrib");
@@ -1544,7 +1631,7 @@ int CudaRasterizer::Rasterizer::renderForward(
 		width, height,
 		imgState.n_contrib2loss,
 		n_contrib,
-		distState.compute_locally
+		compute_locally
 	);
 	timer.stop("83 sum_n_contrib");
 
@@ -1552,40 +1639,6 @@ int CudaRasterizer::Rasterizer::renderForward(
 	// DEBUG: print out timing information
 	if (mode == "train" && zhx_time && iteration % log_interval == 1) {
 		timer.printAllTimes(iteration, world_size, local_rank, log_folder);
-	}
-
-	// DEBUG: print out compute_locally	information
-	if (mode == "train" && zhx_debug && iteration % log_interval == 1) {
-		int last_local_num_rendered_end = distState.last_local_num_rendered_end;
-		int local_num_rendered_end = distState.local_num_rendered_end;
-		uint32_t* gs_on_tiles_cpu = new uint32_t[tile_grid.x * tile_grid.y];
-		CHECK_CUDA(cudaMemcpy(gs_on_tiles_cpu, distState.gs_on_tiles, tile_grid.x * tile_grid.y * sizeof(uint32_t), cudaMemcpyDeviceToHost), debug);
-
-		// distState.compute_locally to cpu
-		bool* compute_locally_cpu = new bool[tile_grid.x * tile_grid.y];
-		CHECK_CUDA(cudaMemcpy(compute_locally_cpu, distState.compute_locally, tile_grid.x * tile_grid.y * sizeof(bool), cudaMemcpyDeviceToHost), debug);
-
-		int num_local_tiles = 0;
-		int local_tiles_left_idx = 999999999;
-		int local_tiles_right_idx = 0;
-		int num_rendered_from_distState = 0;
-		for (int i = 0; i < tile_grid.x * tile_grid.y; i++)
-		{
-			if (compute_locally_cpu[i])
-			{
-				if (local_tiles_left_idx == 999999999)
-					local_tiles_left_idx = i;
-				local_tiles_right_idx = i;
-				num_local_tiles++;
-				num_rendered_from_distState += (int)gs_on_tiles_cpu[i];
-			}
-		}
-
-		sprintf(log_tmp, "num_local_tiles: %d, local_tiles_left_idx: %d, local_tiles_right_idx: %d, last_local_num_rendered_end: %d, local_num_rendered_end: %d, num_rendered: %d, num_rendered_from_distState: %d", (int)num_local_tiles, (int)local_tiles_left_idx, (int)local_tiles_right_idx, (int)last_local_num_rendered_end, (int)local_num_rendered_end, (int)num_rendered, (int)num_rendered_from_distState);
-		save_log_in_file(iteration, local_rank, world_size, log_folder, "num_rendered", log_tmp);
-
-		delete[] compute_locally_cpu;
-		delete[] gs_on_tiles_cpu;
 	}
 
 	// DEBUG: print out the number of Gaussians contributing to each pixel.
@@ -1682,7 +1735,7 @@ void CudaRasterizer::Rasterizer::renderBackward(
 	char* geom_buffer,
 	char* binning_buffer,
 	char* img_buffer,
-	char* dist_buffer,//buffer that contains intermedia results
+	bool* compute_locally,//buffer that contains intermedia results
 	const float* dL_dpix,//gradient of output
 	float* dL_dmean2D,//(P, 3)
 	float* dL_dconic,
@@ -1718,8 +1771,6 @@ void CudaRasterizer::Rasterizer::renderBackward(
 	const dim3 tile_grid((width + BLOCK_X - 1) / BLOCK_X, (height + BLOCK_Y - 1) / BLOCK_Y, 1);
 	const dim3 block(BLOCK_X, BLOCK_Y, 1);
 
-	DistributedState distState = DistributedState::fromChunk(dist_buffer, tile_grid.x * tile_grid.y);
-
 	// Compute loss gradients w.r.t. 2D mean position, conic matrix,
 	// opacity and RGB of Gaussians from per-pixel loss gradients.
 	// If we were given precomputed colors and not SHs, use them.
@@ -1737,7 +1788,7 @@ void CudaRasterizer::Rasterizer::renderBackward(
 		color_ptr,
 		imgState.accum_alpha,
 		imgState.n_contrib,
-		distState.compute_locally,
+		compute_locally,
 		dL_dpix,
 		(float3*)dL_dmean2D,
 		(float4*)dL_dconic,

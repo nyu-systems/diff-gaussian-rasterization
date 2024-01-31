@@ -305,6 +305,7 @@ def render_gaussians(
     rgb,
     depths,
     radii,
+    compute_locally,
     raster_settings,
     cuda_args,
 ):
@@ -314,6 +315,7 @@ def render_gaussians(
         rgb,
         depths,
         radii,
+        compute_locally,
         raster_settings,
         cuda_args,
     )
@@ -327,6 +329,7 @@ class _RenderGaussians(torch.autograd.Function):
         rgb,
         depths,
         radii,
+        compute_locally,
         raster_settings,
         cuda_args,
     ):
@@ -349,17 +352,18 @@ class _RenderGaussians(torch.autograd.Function):
             radii,
             conic_opacity,
             rgb,# 3dgs intermediate results
+            compute_locally,
             raster_settings.debug,
             cuda_args
         )
 
-        num_rendered, color, n_render, n_consider, n_contrib, geomBuffer, binningBuffer, imgBuffer, distBuffer = _C.render_gaussians(*args)
+        num_rendered, color, n_render, n_consider, n_contrib, geomBuffer, binningBuffer, imgBuffer = _C.render_gaussians(*args)
 
         # Keep relevant tensors for backward
         ctx.raster_settings = raster_settings
         ctx.cuda_args = cuda_args
         ctx.num_rendered = num_rendered
-        ctx.save_for_backward(means2D, conic_opacity, rgb, geomBuffer, binningBuffer, imgBuffer, distBuffer)
+        ctx.save_for_backward(means2D, conic_opacity, rgb, geomBuffer, binningBuffer, imgBuffer, compute_locally)
         ctx.mark_non_differentiable(n_render, n_consider, n_contrib)
 
         return color, n_render, n_consider, n_contrib
@@ -372,7 +376,7 @@ class _RenderGaussians(torch.autograd.Function):
         num_rendered = ctx.num_rendered
         raster_settings = ctx.raster_settings
         cuda_args = ctx.cuda_args
-        means2D, conic_opacity, rgb, geomBuffer, binningBuffer, imgBuffer, distBuffer = ctx.saved_tensors
+        means2D, conic_opacity, rgb, geomBuffer, binningBuffer, imgBuffer, compute_locally = ctx.saved_tensors
 
         # Restructure args as C++ method expects them
         args = (raster_settings.bg,
@@ -380,7 +384,7 @@ class _RenderGaussians(torch.autograd.Function):
                 geomBuffer,
                 binningBuffer,
                 imgBuffer,
-                distBuffer,# buffer
+                compute_locally,# buffer
                 grad_color,# gradient of output of this operator
                 means2D,
                 conic_opacity,
@@ -496,7 +500,7 @@ class GaussianRasterizer(nn.Module):
             raster_settings,
             cuda_args)
 
-    def render_gaussians(self, means2D, conic_opacity, rgb, depths, radii, cuda_args = None):
+    def render_gaussians(self, means2D, conic_opacity, rgb, depths, radii, compute_locally, cuda_args = None):
 
         raster_settings = self.raster_settings
 
@@ -507,6 +511,7 @@ class GaussianRasterizer(nn.Module):
             rgb,
             depths,
             radii,
+            compute_locally,
             raster_settings,
             cuda_args
         )
@@ -542,3 +547,15 @@ class GaussianRasterizer(nn.Module):
 
         return local2j_ids
 
+    def get_distribution_strategy(self, means2D, radii, cuda_args):
+        
+        raster_settings = self.raster_settings
+
+        return _C.get_distribution_strategy(
+            raster_settings.image_height,
+            raster_settings.image_width,
+            means2D,
+            radii,
+            raster_settings.debug,
+            cuda_args
+        )# the return is compute_locally

@@ -123,14 +123,21 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	const pybind11::dict &args);
 
 
+////////////////////// GetDistributionStrategy ////////////////////////
+
+torch::Tensor GetDistributionStrategyCUDA(
+    const int image_height,
+    const int image_width,// image setting
+	torch::Tensor& means2D,// (P, 2)
+	torch::Tensor& radii,
+	const bool debug,
+	const pybind11::dict &args);
 
 
 /////////////////////////////// Render ///////////////////////////////
 
 
-
-
-std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 RenderGaussiansCUDA(
 	const torch::Tensor& background,
     const int image_height,
@@ -140,6 +147,7 @@ RenderGaussiansCUDA(
 	torch::Tensor& radii,
 	torch::Tensor& conic_opacity,
 	torch::Tensor& rgb,//3dgs intermediate results
+	const torch::Tensor& compute_locally,
 	const bool debug,
 	const pybind11::dict &args);
 
@@ -150,7 +158,7 @@ RenderGaussiansBackwardCUDA(
 	const torch::Tensor& geomBuffer,
 	const torch::Tensor& binningBuffer,
 	const torch::Tensor& imageBuffer,
-	const torch::Tensor& distBuffer,
+	const torch::Tensor& compute_locally,
     const torch::Tensor& dL_dout_color,
 	const torch::Tensor& means2D,
 	const torch::Tensor& conic_opacity,

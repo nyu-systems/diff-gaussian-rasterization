@@ -415,9 +415,49 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
   return std::make_tuple(dL_dmeans3D, dL_dscales, dL_drotations, dL_dsh, dL_dopacity);
 }
 
+
+////////////////////// GetDistributionStrategy ////////////////////////
+
+torch::Tensor GetDistributionStrategyCUDA(
+    const int image_height,
+    const int image_width,// image setting
+	torch::Tensor& means2D,// (P, 2)
+	torch::Tensor& radii,
+	const bool debug,
+	const pybind11::dict &args)
+{
+	const int P = means2D.size(0);
+	const int TILE_Y = (image_height + BLOCK_Y - 1) / BLOCK_Y;
+	const int TILE_X = (image_width + BLOCK_X - 1) / BLOCK_X;
+	const int tile_num = TILE_Y * TILE_X;
+	
+	//no gradient
+	torch::Tensor compute_locally = torch::full({tile_num}, false, means2D.options().dtype(at::kBool).requires_grad(false));
+
+	torch::Device device(torch::kCUDA);
+	torch::TensorOptions options(torch::kByte);
+	torch::Tensor distBuffer = torch::empty({0}, options.device(device));
+	std::function<char*(size_t)> distFunc = resizeFunctional(distBuffer);
+
+	if (P != 0)
+	{
+		CudaRasterizer::Rasterizer::getDistributionStrategy(
+			distFunc,
+			P,
+			image_width, image_height,
+			reinterpret_cast<float2*>(means2D.contiguous().data<float>()),
+			radii.contiguous().data<int>(),
+			compute_locally.contiguous().data<bool>(),
+			debug,
+			args);
+	}
+	return compute_locally;
+}
+
+
 /////////////////////////////// Render ///////////////////////////////
 
-std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 RenderGaussiansCUDA(
 	const torch::Tensor& background,
     const int image_height,
@@ -427,6 +467,7 @@ RenderGaussiansCUDA(
 	torch::Tensor& radii,
 	torch::Tensor& conic_opacity,
 	torch::Tensor& rgb,//3dgs intermediate results
+	const torch::Tensor& compute_locally,
 	const bool debug,
 	const pybind11::dict &args)
 {
@@ -451,11 +492,9 @@ RenderGaussiansCUDA(
   torch::Tensor geomBuffer = torch::empty({0}, options.device(device));
   torch::Tensor binningBuffer = torch::empty({0}, options.device(device));
   torch::Tensor imgBuffer = torch::empty({0}, options.device(device));
-  torch::Tensor distBuffer = torch::empty({0}, options.device(device));
   std::function<char*(size_t)> geomFunc = resizeFunctional(geomBuffer);
   std::function<char*(size_t)> binningFunc = resizeFunctional(binningBuffer);
   std::function<char*(size_t)> imgFunc = resizeFunctional(imgBuffer);
-  std::function<char*(size_t)> distFunc = resizeFunctional(distBuffer);
   
   int rendered = 0;
   if(P != 0)
@@ -463,8 +502,7 @@ RenderGaussiansCUDA(
 	  rendered = CudaRasterizer::Rasterizer::renderForward(
 		geomFunc,
 		binningFunc,
-		imgFunc,
-		distFunc,//buffer
+		imgFunc,//buffer
 	    P,
 		background.contiguous().data<float>(),
 		W, H,//image setting
@@ -473,6 +511,7 @@ RenderGaussiansCUDA(
 		radii.contiguous().data<int>(),
 		reinterpret_cast<float4*>(conic_opacity.contiguous().data<float>()),
 		rgb.contiguous().data<float>(),//3dgs intermediate results
+		compute_locally.contiguous().data<bool>(),
 		out_color.contiguous().data<float>(),
 		n_render.contiguous().data<int>(),
 		n_consider.contiguous().data<int>(),
@@ -480,7 +519,7 @@ RenderGaussiansCUDA(
 		debug,
 		args);
   }
-  return std::make_tuple(rendered, out_color, n_render, n_consider, n_contrib, geomBuffer, binningBuffer, imgBuffer, distBuffer);
+  return std::make_tuple(rendered, out_color, n_render, n_consider, n_contrib, geomBuffer, binningBuffer, imgBuffer);
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
@@ -490,7 +529,7 @@ RenderGaussiansBackwardCUDA(
 	const torch::Tensor& geomBuffer,
 	const torch::Tensor& binningBuffer,
 	const torch::Tensor& imageBuffer,
-	const torch::Tensor& distBuffer,
+	const torch::Tensor& compute_locally,
     const torch::Tensor& dL_dout_color,
 	const torch::Tensor& means2D,// (P, 2)
 	const torch::Tensor& conic_opacity,
@@ -515,8 +554,8 @@ RenderGaussiansBackwardCUDA(
 		W, H,//rasterization settings.  
 		reinterpret_cast<char*>(geomBuffer.contiguous().data_ptr()),
 		reinterpret_cast<char*>(binningBuffer.contiguous().data_ptr()),
-		reinterpret_cast<char*>(imageBuffer.contiguous().data_ptr()),
-		reinterpret_cast<char*>(distBuffer.contiguous().data_ptr()),//buffer that contains intermedia results
+		reinterpret_cast<char*>(imageBuffer.contiguous().data_ptr()),//buffer that contains intermedia results
+		compute_locally.contiguous().data<bool>(),
 		dL_dout_color.contiguous().data<float>(),//gradient of output
 		dL_dmeans2D.contiguous().data<float>(),
 		dL_dconic.contiguous().data<float>(),

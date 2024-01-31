@@ -156,6 +156,19 @@ namespace CudaRasterizer
 			const pybind11::dict &args);
 		
 
+		////////////////////// GetDistributionStrategy ////////////////////////
+
+		static void getDistributionStrategy(
+			std::function<char* (size_t)> distBuffer,
+			const int P,
+			const int width, int height,
+			float2* means2D,
+			int* radii,
+			bool* compute_locally,
+			bool debug,
+			const pybind11::dict &args);
+
+
 
 		/////////////////////////////// Render ///////////////////////////////
 
@@ -166,7 +179,6 @@ namespace CudaRasterizer
 			std::function<char* (size_t)> geometryBuffer,
 			std::function<char* (size_t)> binningBuffer,
 			std::function<char* (size_t)> imageBuffer,
-			std::function<char* (size_t)> distBuffer,
 			const int P,
 			const float* background,
 			const int width, int height,
@@ -175,6 +187,7 @@ namespace CudaRasterizer
 			int* radii,
 			float4* conic_opacity,
 			float* rgb,
+			bool* compute_locally,
 			float* out_color,
 			int* n_render,// TODO: int* could not match with uint32_t*. error may occur, especially when the number is large.
 			int* n_consider,// If your uint32_t array contains values higher than 2,147,483,647, they will overflow when converted to int.
@@ -188,8 +201,8 @@ namespace CudaRasterizer
 			const int width, int height,//rasterization settings. 
 			char* geom_buffer,
 			char* binning_buffer,
-			char* img_buffer,
-			char* dist_buffer,//buffer that contains intermedia results
+			char* img_buffer,//buffer that contains intermedia results
+			bool* compute_locally,
 			const float* dL_dpix,//gradient of output
 			float* dL_dmean2D,
 			float* dL_dconic,
