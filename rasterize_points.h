@@ -134,6 +134,49 @@ torch::Tensor GetDistributionStrategyCUDA(
 	const pybind11::dict &args);
 
 
+
+
+////////////////////// Image Distribution Utilities ////////////////////////
+
+torch::Tensor GetTouchedLocally(
+	const torch::Tensor& compute_locally,
+	const int image_height,
+	const int image_width,
+	const int extension_distance
+);
+
+torch::Tensor LoadImageTilesByPos(
+	const torch::Tensor& local_image_rect,
+	const torch::Tensor& all_tiles_pos,
+	int image_height,
+	int image_width,
+	int min_pixel_y,
+	int min_pixel_x,
+	int local_image_rect_height,
+	int local_image_rect_width);
+
+torch::Tensor SetImageTilesByPos(
+	const torch::Tensor& all_tiles_pos,
+	const torch::Tensor& image_tiles,
+	int image_height,
+	int image_width,
+	int min_pixel_y,
+	int min_pixel_x,
+	int local_image_rect_height,
+	int local_image_rect_width);
+
+torch::Tensor GetPixelsComputeLocallyAndInRect(
+	const torch::Tensor& compute_locally,
+	int image_height,
+	int image_width,
+	int min_pixel_y,
+	int max_pixel_y,
+	int min_pixel_x,
+	int max_pixel_x);
+
+
+
+
 /////////////////////////////// Render ///////////////////////////////
 
 

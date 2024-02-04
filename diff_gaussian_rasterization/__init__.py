@@ -559,3 +559,135 @@ class GaussianRasterizer(nn.Module):
             raster_settings.debug,
             cuda_args
         )# the return is compute_locally
+
+class _LoadImageTilesByPos(torch.autograd.Function):
+
+    @staticmethod
+    def forward(
+        ctx,
+        local_image_rect,
+        all_tiles_pos,
+        image_height, image_width,
+        touched_pixels_rect,
+        touched_tiles_rect
+    ):
+        ctx.save_for_backward(local_image_rect, all_tiles_pos)
+        ctx.image_height = image_height
+        ctx.image_width = image_width
+        ctx.touched_pixels_rect = touched_pixels_rect
+        ctx.touched_tiles_rect = touched_tiles_rect
+
+        min_pixel_y, max_pixel_y, min_pixel_x, max_pixel_x = touched_pixels_rect
+
+        return _C.load_image_tiles_by_pos(local_image_rect,
+                                          all_tiles_pos,
+                                          image_height,
+                                          image_width,
+                                          min_pixel_y,
+                                          min_pixel_x,
+                                          max_pixel_y-min_pixel_y,
+                                          max_pixel_x-min_pixel_x)
+        # return shape: (N, 3, BLOCK_Y, BLOCK_X)
+
+    @staticmethod
+    def backward(ctx, grad_image_tiles):
+        # grad_image_tiles: (N, 3, BLOCK_Y, BLOCK_X)
+
+        local_image_rect, all_tiles_pos = ctx.saved_tensors
+        image_height = ctx.image_height
+        image_width = ctx.image_width
+        touched_pixels_rect = ctx.touched_pixels_rect
+
+        min_pixel_y, max_pixel_y, min_pixel_x, max_pixel_x = touched_pixels_rect
+
+        grad_local_image_rect = _C.set_image_tiles_by_pos(all_tiles_pos,
+                                                          grad_image_tiles,
+                                                          image_height,
+                                                          image_width,
+                                                          min_pixel_y,
+                                                          min_pixel_x,
+                                                          max_pixel_y-min_pixel_y,
+                                                          max_pixel_x-min_pixel_x)
+
+        # return tensor in which the grad_image_tiles are set to the right position, and the rest are zeros.
+        return grad_local_image_rect, None, None, None, None, None
+
+class _MergeImageTilesByPos(torch.autograd.Function):
+
+    @staticmethod
+    def forward(
+        ctx,
+        all_tiles_pos,
+        image_tiles,
+        image_height, image_width,
+        touched_pixels_rect,
+        touched_tiles_rect
+    ):
+        ctx.save_for_backward(all_tiles_pos, image_tiles)
+        ctx.image_height = image_height
+        ctx.image_width = image_width
+        ctx.touched_pixels_rect = touched_pixels_rect
+
+        min_pixel_y, max_pixel_y, min_pixel_x, max_pixel_x = touched_pixels_rect
+
+        merged_local_image_rect = _C.set_image_tiles_by_pos(all_tiles_pos,
+                                                            image_tiles,
+                                                            image_height,
+                                                            image_width,
+                                                            min_pixel_y,
+                                                            min_pixel_x,
+                                                            max_pixel_y-min_pixel_y,
+                                                            max_pixel_x-min_pixel_x)
+        return merged_local_image_rect # (3, H, W)
+
+    @staticmethod
+    def backward(ctx, grad_merged_local_image_rect):
+        # grad_image_tiles: (N, 3, BLOCK_Y, BLOCK_X)
+
+        all_tiles_pos, image_tiles = ctx.saved_tensors
+        image_height = ctx.image_height
+        image_width = ctx.image_width
+        touched_pixels_rect = ctx.touched_pixels_rect
+
+        min_pixel_y, max_pixel_y, min_pixel_x, max_pixel_x = touched_pixels_rect
+
+        grad_image_tiles = _C.load_image_tiles_by_pos(grad_merged_local_image_rect,
+                                                      all_tiles_pos,
+                                                      image_height,
+                                                      image_width,
+                                                      min_pixel_y,
+                                                      min_pixel_x,
+                                                      max_pixel_y-min_pixel_y,
+                                                      max_pixel_x-min_pixel_x)
+
+        return None, grad_image_tiles, None, None, None, None
+
+def load_image_tiles_by_pos(
+    local_image_rect,# in local coordinate
+    all_tiles_pos,# in global coordinate
+    image_height, image_width,
+    touched_pixels_rect,
+    touched_tiles_rect
+):
+    return _LoadImageTilesByPos.apply(
+        local_image_rect,
+        all_tiles_pos,
+        image_height, image_width,
+        touched_pixels_rect,
+        touched_tiles_rect
+    )
+
+def merge_image_tiles_by_pos(
+    all_tiles_pos,# in global coordinate
+    image_tiles,
+    image_height, image_width,
+    touched_pixels_rect,
+    touched_tiles_rect
+):
+    return _MergeImageTilesByPos.apply(
+        all_tiles_pos,
+        image_tiles,
+        image_height, image_width,
+        touched_pixels_rect,
+        touched_tiles_rect
+    )# return image should be in local coordinate.

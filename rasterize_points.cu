@@ -429,10 +429,8 @@ torch::Tensor GetDistributionStrategyCUDA(
 	const int P = means2D.size(0);
 	const int TILE_Y = (image_height + BLOCK_Y - 1) / BLOCK_Y;
 	const int TILE_X = (image_width + BLOCK_X - 1) / BLOCK_X;
-	const int tile_num = TILE_Y * TILE_X;
 	
-	//no gradient
-	torch::Tensor compute_locally = torch::full({tile_num}, false, means2D.options().dtype(at::kBool).requires_grad(false));
+	torch::Tensor compute_locally = torch::full({TILE_Y, TILE_X}, false, means2D.options().dtype(at::kBool).requires_grad(false));
 
 	torch::Device device(torch::kCUDA);
 	torch::TensorOptions options(torch::kByte);
@@ -656,4 +654,260 @@ torch::Tensor GetLocal2jIdsBoolCUDA(
 	);
 
 	return local2jIdsBool;
+}
+
+
+
+
+
+
+
+
+////////////////////// Image Distribution Utilities ////////////////////////
+
+
+__global__ void get_touched_locally(
+	const int tile_num,
+	const int TILE_Y,
+	const int TILE_X,
+	const bool* compute_locally,
+	bool* touched_locally
+) {
+	auto i = cg::this_grid().thread_rank();
+	if (i < tile_num && compute_locally[i])
+	{
+		int y = i / TILE_X;
+		int x = i % TILE_X;
+		touched_locally[i] = true;
+		const int dx[8] = {-1, -1, -1, 0, 0, 1, 1, 1};//by default, extension_distance is 1.
+		const int dy[8] = {-1, 0, 1, -1, 1, -1, 0, 1};
+		for (int k = 0; k < 8; k++)
+		{
+			int ny = y + dy[k];
+			int nx = x + dx[k];
+			if (ny >= 0 && ny < TILE_Y && nx >= 0 && nx < TILE_X)
+				touched_locally[ny * TILE_X + nx] = true;
+		}
+	}
+}
+
+torch::Tensor GetTouchedLocally(
+	const torch::Tensor& compute_locally,
+	const int image_height,
+	const int image_width,
+	const int extension_distance
+) {
+	const int TILE_Y = (image_height + BLOCK_Y - 1) / BLOCK_Y;
+	const int TILE_X = (image_width + BLOCK_X - 1) / BLOCK_X;
+	const int tile_num = TILE_Y * TILE_X;// NOTE: at most, we have 5000*5000/16/16 = 97656 tiles
+	
+	torch::Tensor touched_locally = torch::full({TILE_Y, TILE_X}, false, compute_locally.options());
+
+	get_touched_locally<<< (tile_num + 255) / 256, 256 >>> (
+		tile_num,
+		TILE_Y,
+		TILE_X,
+		compute_locally.contiguous().data<bool>(),
+		touched_locally.contiguous().data<bool>()
+	);
+	return touched_locally;
+}
+
+
+__global__ void load_image_tiles_by_pos(
+	int N,
+	int image_height,
+	int image_width,
+	int min_pixel_y,
+	int min_pixel_x,
+	int local_image_rect_height,
+	int local_image_rect_width,
+	const int64_t* all_tiles_pos,
+	const float* local_image_rect,
+	float* image_tiles)
+{
+	auto block = cg::this_thread_block();
+	int i = block.group_index().x;
+	int tile_pos_y = (int)all_tiles_pos[ i * 2 ];
+	int tile_pos_x = (int)all_tiles_pos[ i * 2 + 1 ];
+
+	int image_x = tile_pos_x * BLOCK_X + block.thread_index().x;
+	int image_y = tile_pos_y * BLOCK_Y + block.thread_index().y;
+
+	int image_tiles_offset = i * 3 * BLOCK_X * BLOCK_Y + block.thread_rank();
+	int tile_pixels_num = BLOCK_X * BLOCK_Y;
+
+	if (image_x < image_width && image_y < image_height)
+	{
+		int local_image_rect_x = image_x - min_pixel_x;
+		int local_image_rect_y = image_y - min_pixel_y;
+		int local_image_rect_offset = local_image_rect_y * local_image_rect_width + local_image_rect_x;
+		int local_image_rect_pixels_num = local_image_rect_height * local_image_rect_width;
+
+		image_tiles[image_tiles_offset] = local_image_rect[local_image_rect_offset];
+		image_tiles[image_tiles_offset + tile_pixels_num] = local_image_rect[local_image_rect_offset + local_image_rect_pixels_num];
+		image_tiles[image_tiles_offset + 2 * tile_pixels_num] = local_image_rect[local_image_rect_offset + 2 * local_image_rect_pixels_num];
+	}
+	else
+	{
+		image_tiles[image_tiles_offset] = 0.0;
+		image_tiles[image_tiles_offset + tile_pixels_num] = 0.0;
+		image_tiles[image_tiles_offset + 2 * tile_pixels_num] = 0.0;
+	}
+}
+
+__global__ void set_image_tiles_by_pos(
+	int N,
+	int image_height,
+	int image_width,
+	int min_pixel_y,
+	int min_pixel_x,
+	int local_image_rect_height,
+	int local_image_rect_width,
+	const int64_t* all_tiles_pos,
+	float* local_image_rect,
+	const float* image_tiles)
+{
+	auto block = cg::this_thread_block();
+	int i = block.group_index().x;
+	int tile_pos_y = (int)all_tiles_pos[ i * 2 ];
+	int tile_pos_x = (int)all_tiles_pos[ i * 2 + 1 ];
+
+	int image_x = tile_pos_x * BLOCK_X + block.thread_index().x;
+	int image_y = tile_pos_y * BLOCK_Y + block.thread_index().y;
+
+	int image_tiles_offset = i * 3 * BLOCK_X * BLOCK_Y + block.thread_rank();
+	if (image_x < image_width && image_y < image_height)
+	{
+		int local_image_rect_x = image_x - min_pixel_x;
+		int local_image_rect_y = image_y - min_pixel_y;
+		int local_image_rect_offset = local_image_rect_y * local_image_rect_width + local_image_rect_x;
+		int local_image_rect_pixels_num = local_image_rect_height * local_image_rect_width;
+		int tile_pixels_num = BLOCK_X * BLOCK_Y;
+
+		local_image_rect[local_image_rect_offset] = image_tiles[image_tiles_offset];
+		local_image_rect[local_image_rect_offset + local_image_rect_pixels_num] = image_tiles[image_tiles_offset + tile_pixels_num];
+		local_image_rect[local_image_rect_offset + 2 * local_image_rect_pixels_num] = image_tiles[image_tiles_offset + 2 * tile_pixels_num];
+	}
+}
+
+torch::Tensor LoadImageTilesByPos(
+	const torch::Tensor& local_image_rect,
+	const torch::Tensor& all_tiles_pos,
+	int image_height,
+	int image_width,
+	int min_pixel_y,
+	int min_pixel_x,
+	int local_image_rect_height,
+	int local_image_rect_width)
+{
+	const int N = all_tiles_pos.size(0);
+	dim3 tile_grid(N, 1, 1);
+	dim3 block(BLOCK_X, BLOCK_Y, 1);
+
+	torch::Tensor image_tiles = torch::full({N, 3, BLOCK_Y, BLOCK_X}, 0.0, local_image_rect.options());
+	// if image.options() requires_grad, then image_tiles.options() requires_grad should also requires_grad.
+
+	load_image_tiles_by_pos<<< tile_grid, block >>>(
+		N,
+		image_height,
+		image_width,
+		min_pixel_y,
+		min_pixel_x,
+		local_image_rect_height,
+		local_image_rect_width,
+		all_tiles_pos.contiguous().data<int64_t>(),
+		local_image_rect.contiguous().data<float>(),
+		image_tiles.contiguous().data<float>()
+	);
+	return image_tiles;
+}
+
+torch::Tensor SetImageTilesByPos(
+	const torch::Tensor& all_tiles_pos,
+	const torch::Tensor& image_tiles,
+	int image_height,
+	int image_width,
+	int min_pixel_y,
+	int min_pixel_x,
+	int local_image_rect_height,
+	int local_image_rect_width)
+{
+	const int N = all_tiles_pos.size(0);
+	dim3 tile_grid(N, 1, 1);
+	dim3 block(BLOCK_X, BLOCK_Y, 1);
+
+	torch::Tensor local_image_rect = torch::full({3, local_image_rect_height, local_image_rect_width}, 0.0, image_tiles.options());
+
+	set_image_tiles_by_pos <<< tile_grid, block >>>(
+		N,
+		image_height,
+		image_width,
+		min_pixel_y,
+		min_pixel_x,
+		local_image_rect_height,
+		local_image_rect_width,
+		all_tiles_pos.contiguous().data<int64_t>(),
+		local_image_rect.contiguous().data<float>(),
+		image_tiles.contiguous().data<float>()
+	);
+	return local_image_rect;
+}
+
+
+__global__ void get_pixels_compute_locally_and_in_rect(
+	int image_height,
+	int image_width,
+	int local_image_height,
+	int local_image_width,
+	int min_pixel_y,
+	int min_pixel_x,
+	const bool* compute_locally,
+	bool* pixels_compute_locally_and_in_rect)
+{
+	auto block = cg::this_thread_block();
+	int local_pixel_x = block.group_index().x * BLOCK_X + block.thread_index().x;
+	int local_pixel_y = block.group_index().y * BLOCK_Y + block.thread_index().y;
+
+	if (local_pixel_x < local_image_width && local_pixel_y < local_image_height)
+	{
+		int global_pixel_x = local_pixel_x + min_pixel_x;
+		int global_pixel_y = local_pixel_y + min_pixel_y;
+		int global_tile_x = global_pixel_x / BLOCK_X;
+		int global_tile_y = global_pixel_y / BLOCK_Y;
+		int TILE_X = (image_width + BLOCK_X - 1) / BLOCK_X;
+		pixels_compute_locally_and_in_rect[local_pixel_y * local_image_width + local_pixel_x] = compute_locally[global_tile_y * TILE_X + global_tile_x];
+	}
+}
+
+torch::Tensor GetPixelsComputeLocallyAndInRect(
+	const torch::Tensor& compute_locally,
+	int image_height,
+	int image_width,
+	int min_pixel_y,
+	int max_pixel_y,
+	int min_pixel_x,
+	int max_pixel_x)
+{
+	int local_image_height = max_pixel_y - min_pixel_y;
+	int local_image_width = max_pixel_x - min_pixel_x;
+	const int TILE_Y = (local_image_height + BLOCK_Y - 1) / BLOCK_Y;
+	const int TILE_X = (local_image_width + BLOCK_X - 1) / BLOCK_X;
+
+	dim3 tile_grid(TILE_X, TILE_Y, 1);
+	dim3 block(BLOCK_X, BLOCK_Y, 1);
+	
+	torch::Tensor pixels_compute_locally_and_in_rect = torch::full({max_pixel_y - min_pixel_y, max_pixel_x - min_pixel_x}, false, compute_locally.options().dtype(at::kBool));
+
+	get_pixels_compute_locally_and_in_rect << < tile_grid, block >> > (
+		image_height,
+		image_width,	
+		local_image_height,
+		local_image_width,
+		min_pixel_y,
+		min_pixel_x,
+		compute_locally.contiguous().data<bool>(),
+		pixels_compute_locally_and_in_rect.contiguous().data<bool>()
+	);
+	return pixels_compute_locally_and_in_rect;
 }
