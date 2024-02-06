@@ -11,7 +11,7 @@
 
 #include "forward.h"
 #include "auxiliary.h"
-#include "my_timer.cu"
+#include "timers.cu"
 #include <cooperative_groups.h>
 #include <cooperative_groups/reduce.h>
 namespace cg = cooperative_groups;
