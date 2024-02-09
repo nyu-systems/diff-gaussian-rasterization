@@ -1108,6 +1108,10 @@ void CudaRasterizer::Rasterizer::renderBackward(
 		dL_dcolor), debug)
 	timer.stop("b10 render");
 
+	float backward_render_time = timer.elapsedMilliseconds("b10 render", "sum");
+	// save backward_render_time in args["stats_collector"] which is a python::dict. Then it could be sent back to python.
+	args["stats_collector"]["backward_render_time"] = backward_render_time;
+	
 	// Print out timing information
 	if (zhx_time && iteration % log_interval == 1) {
 		timer.printAllTimes(iteration, world_size, local_rank, log_folder, false);
