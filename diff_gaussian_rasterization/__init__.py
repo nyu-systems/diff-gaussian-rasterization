@@ -359,7 +359,7 @@ class GaussianRasterizer(nn.Module):
 
         local2j_ids = []
         for rk in range(world_size):
-            local2j_ids.append(local2j_ids_bool[:, rk].nonzero().squeeze())
+            local2j_ids.append(local2j_ids_bool[:, rk].nonzero())
 
         return local2j_ids
 
