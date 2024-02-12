@@ -361,7 +361,7 @@ class GaussianRasterizer(nn.Module):
         for rk in range(world_size):
             local2j_ids.append(local2j_ids_bool[:, rk].nonzero())
 
-        return local2j_ids
+        return local2j_ids, local2j_ids_bool
 
     def get_distribution_strategy(self, means2D, radii, cuda_args):
         
