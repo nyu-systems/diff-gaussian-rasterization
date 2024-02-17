@@ -511,7 +511,7 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 }
 
 void save_log_in_file(int iteration, int local_rank, int world_size, std::string log_folder, const char* filename_prefix, const char* log_content) {
-	char* filename = new char[64];
+	char* filename = new char[128];
 	sprintf(filename, "%s/%s_ws=%d_rk=%d.log", log_folder.c_str(), filename_prefix, world_size, local_rank);
 	std::ofstream outfile;
 	outfile.open(filename, std::ios_base::app);
