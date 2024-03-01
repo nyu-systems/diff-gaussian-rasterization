@@ -11,6 +11,7 @@
 
 #include <torch/extension.h>
 #include "rasterize_points.h"
+#include "cuda_rasterizer/config.h"
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("mark_visible", &markVisible);
@@ -26,4 +27,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("load_image_tiles_by_pos", &LoadImageTilesByPos);
   m.def("set_image_tiles_by_pos", &SetImageTilesByPos);
   m.def("get_pixels_compute_locally_and_in_rect", &GetPixelsComputeLocallyAndInRect);
+
+  m.def("get_block_XY", &GetBlockXY);
 }

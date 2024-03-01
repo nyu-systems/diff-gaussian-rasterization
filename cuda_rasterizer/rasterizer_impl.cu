@@ -153,7 +153,7 @@ void CudaRasterizer::Rasterizer::markVisible(
 	float* projmatrix,
 	bool* present)
 {
-	checkFrustum << <(P + 255) / 256, 256 >> > (
+	checkFrustum << <(P + ONE_DIM_BLOCK_SIZE - 1) / ONE_DIM_BLOCK_SIZE, ONE_DIM_BLOCK_SIZE >> > (
 		P,
 		means3D,
 		viewmatrix, projmatrix,
@@ -401,7 +401,7 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 	int tile_num = tile_grid.x * tile_grid.y;
 	timer.start("21 updateDistributedStatLocally.getGlobalGaussianOnTiles");
 	cudaMemset(distState.gs_on_tiles, 0, tile_num * sizeof(uint32_t));
-	getGlobalGaussianOnTiles <<<(P + 255) / 256, 256 >>> (
+	getGlobalGaussianOnTiles <<<(P + ONE_DIM_BLOCK_SIZE - 1) / ONE_DIM_BLOCK_SIZE, ONE_DIM_BLOCK_SIZE >>> (
 		P,
 		means2D,
 		radii,
@@ -426,7 +426,7 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 			int num_rendered_per_device = num_rendered / world_size + 1;
 			int last_local_num_rendered_end = num_rendered_per_device * local_rank;
 			int local_num_rendered_end = min(num_rendered_per_device * (local_rank + 1), num_rendered);
-			getComputeLocally <<<(tile_num + 255) / 256, 256 >>> (
+			getComputeLocally <<<(tile_num + ONE_DIM_BLOCK_SIZE - 1) / ONE_DIM_BLOCK_SIZE, ONE_DIM_BLOCK_SIZE >>> (
 				tile_num,
 				distState.gs_on_tiles_offsets,
 				distState.compute_locally,
@@ -440,7 +440,7 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 			int last_local_num_rendered_end = num_tiles_per_device * local_rank;
 			int local_num_rendered_end = min(num_tiles_per_device * (local_rank + 1), tile_num);
 			//TODO: optimze this; in some cases, it will not be divied evenly -> 2170 will be into 1086 and 1084
-			getComputeLocallyByTileNum <<<(tile_num + 255) / 256, 256 >>> (
+			getComputeLocallyByTileNum <<<(tile_num + ONE_DIM_BLOCK_SIZE - 1) / ONE_DIM_BLOCK_SIZE, ONE_DIM_BLOCK_SIZE >>> (
 				tile_num,
 				distState.compute_locally,
 				last_local_num_rendered_end,
@@ -465,7 +465,7 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 			delete[] dist_division_mode_right;
 			// printf("dist_division_mode is %s, tile_id_start is %d, tile_id_end is %d\n", dist_division_mode, tile_id_start, tile_id_end);
 			
-			getComputeLocallyByTileId <<<(tile_num + 255) / 256, 256 >>> (
+			getComputeLocallyByTileId <<<(tile_num + ONE_DIM_BLOCK_SIZE - 1) / ONE_DIM_BLOCK_SIZE, ONE_DIM_BLOCK_SIZE >>> (
 				tile_num,
 				distState.compute_locally,
 				tile_id_start,
@@ -490,7 +490,7 @@ void updateDistributedStatLocally(//TODO: optimize implementations for all these
 			delete[] dist_division_mode_right;
 			// printf("dist_division_mode is %s, row_id_start is %d, row_id_end is %d\n", dist_division_mode, row_id_start, row_id_end);
 
-			getComputeLocallyByRowId <<<(tile_num + 255) / 256, 256 >>> (
+			getComputeLocallyByRowId <<<(tile_num + ONE_DIM_BLOCK_SIZE - 1) / ONE_DIM_BLOCK_SIZE, ONE_DIM_BLOCK_SIZE >>> (
 				tile_num,
 				distState.compute_locally,
 				tile_grid.x,
@@ -849,7 +849,7 @@ int CudaRasterizer::Rasterizer::renderForward(
 
 	timer.start("24 updateDistributedStatLocally.updateTileTouched");
 	// For sep_rendering==True case (here), we only compute tiles_touched in the renderForward.
-	updateTileTouched <<<(P + 255) / 256, 256 >>> (
+	updateTileTouched <<<(P + ONE_DIM_BLOCK_SIZE - 1) / ONE_DIM_BLOCK_SIZE, ONE_DIM_BLOCK_SIZE >>> (
 		P,
 		tile_grid,
 		radii,
@@ -876,7 +876,7 @@ int CudaRasterizer::Rasterizer::renderForward(
 	timer.start("40 duplicateWithKeys");
 	// For each instance to be rendered, produce adequate [ tile | depth ] key 
 	// and corresponding dublicated Gaussian indices to be sorted
-	duplicateWithKeys << <(P + 255) / 256, 256 >> > (
+	duplicateWithKeys << <(P + ONE_DIM_BLOCK_SIZE - 1) / ONE_DIM_BLOCK_SIZE, ONE_DIM_BLOCK_SIZE >> > (
 		P,
 		means2D,
 		depths,
@@ -908,7 +908,7 @@ int CudaRasterizer::Rasterizer::renderForward(
 	timer.start("60 identifyTileRanges");
 	// Identify start and end of per-tile workloads in sorted list
 	if (num_rendered > 0)
-		identifyTileRanges << <(num_rendered + 255) / 256, 256 >> > (
+		identifyTileRanges << <(num_rendered + ONE_DIM_BLOCK_SIZE - 1) / ONE_DIM_BLOCK_SIZE, ONE_DIM_BLOCK_SIZE >> > (
 			num_rendered,
 			binningState.point_list_keys,
 			imgState.ranges);
@@ -938,7 +938,7 @@ int CudaRasterizer::Rasterizer::renderForward(
 	// We may have different implementation.
 
 	timer.start("81 sum_n_render");
-	get_n_render<<< (tile_num + 255) / 256, 256 >>> (
+	get_n_render<<< (tile_num + ONE_DIM_BLOCK_SIZE - 1) / ONE_DIM_BLOCK_SIZE, ONE_DIM_BLOCK_SIZE >>> (
 		tile_num,
 		imgState.ranges,
 		n_render

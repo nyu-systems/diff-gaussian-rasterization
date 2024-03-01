@@ -27,6 +27,9 @@ setup(
             "cuda_rasterizer/timers.cu",
             "rasterize_points.cu",
             "ext.cpp"],
+            headers=[
+                "config.h"
+            ],
             extra_compile_args={"nvcc": ["-I" + os.path.join(os.path.dirname(os.path.abspath(__file__)), "third_party/glm/")]})
         ],
     cmdclass={

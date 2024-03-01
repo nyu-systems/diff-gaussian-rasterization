@@ -176,3 +176,5 @@ torch::Tensor GetLocal2jIdsBoolCUDA(
 	const torch::Tensor& radii,
 	const torch::Tensor& dist_global_strategy,
 	const pybind11::dict &args);
+
+std::tuple<int, int, int> GetBlockXY();

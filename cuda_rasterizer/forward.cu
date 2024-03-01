@@ -451,7 +451,7 @@ void FORWARD::preprocess(int P, int D, int M,
 	int local_rank,
 	int world_size)
 {
-	preprocessCUDA<NUM_CHANNELS> << <(P + 255) / 256, 256 >> > (
+	preprocessCUDA<NUM_CHANNELS> << <(P + ONE_DIM_BLOCK_SIZE - 1) / ONE_DIM_BLOCK_SIZE, ONE_DIM_BLOCK_SIZE >> > (
 		P, D, M,
 		means3D,
 		scales,

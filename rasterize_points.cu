@@ -460,7 +460,7 @@ torch::Tensor GetLocal2jIdsBoolCUDA(
 
 	torch::Tensor local2jIdsBool = torch::full({P, world_size}, false, means2D.options().dtype(torch::kBool));
 
-	getTouchedIdsBool << <(P + 255) / 256, 256 >> >(
+	getTouchedIdsBool << <(P + ONE_DIM_BLOCK_SIZE - 1) / ONE_DIM_BLOCK_SIZE, ONE_DIM_BLOCK_SIZE >> >(
 		P,
 		H,
 		W,
@@ -521,7 +521,7 @@ torch::Tensor GetTouchedLocally(
 	
 	torch::Tensor touched_locally = torch::full({TILE_Y, TILE_X}, false, compute_locally.options());
 
-	get_touched_locally<<< (tile_num + 255) / 256, 256 >>> (
+	get_touched_locally<<< (tile_num + ONE_DIM_BLOCK_SIZE - 1) / ONE_DIM_BLOCK_SIZE, ONE_DIM_BLOCK_SIZE >>> (
 		tile_num,
 		TILE_Y,
 		TILE_X,
@@ -728,4 +728,9 @@ torch::Tensor GetPixelsComputeLocallyAndInRect(
 		pixels_compute_locally_and_in_rect.contiguous().data<bool>()
 	);
 	return pixels_compute_locally_and_in_rect;
+}
+
+std::tuple<int, int, int> GetBlockXY()
+{
+	return std::make_tuple(BLOCK_X, BLOCK_Y, ONE_DIM_BLOCK_SIZE);
 }
