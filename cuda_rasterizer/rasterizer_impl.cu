@@ -961,6 +961,9 @@ int CudaRasterizer::Rasterizer::renderForward(
 	);
 	timer.stop("83 sum_n_contrib");
 
+	float forward_render_time = timer.elapsedMilliseconds("70 render", "sum") + timer.elapsedMilliseconds("50 SortPairs", "sum") + timer.elapsedMilliseconds("40 duplicateWithKeys", "sum");
+	args["stats_collector"]["forward_render_time"] = forward_render_time;
+
 	//////////////////////////// Logging && Save Statictis ////////////////////////////////////////////
 	// DEBUG: print out timing information
 	if (mode == "train" && zhx_time && iteration % log_interval == 1) {
