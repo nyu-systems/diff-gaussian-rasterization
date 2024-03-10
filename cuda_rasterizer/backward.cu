@@ -417,7 +417,32 @@ renderCUDA(
 {
 	// We rasterize again. Compute necessary block info.
 	auto block = cg::this_thread_block();
+
+	// method 1
+	// const uint32_t horizontal_blocks = (W + BLOCK_X - 1) / BLOCK_X;
+	// auto block_id = block.group_index().y * horizontal_blocks + block.group_index().x;
+
+	// method 2: this seems to be faster than others, in set of experiments: fix_com_loc_flc_1/2/3
 	const uint32_t horizontal_blocks = (W + BLOCK_X - 1) / BLOCK_X;
+	auto block_id = block.group_index().y * horizontal_blocks + block.group_index().x;
+	if (!compute_locally[block_id])
+		return;
+
+	// method 3
+	// __shared__ bool compute_locally_this_tile;
+	// __shared__ uint2 range_this_tile;
+	// if (block.thread_rank() == 0)
+	// {
+	// 	uint32_t horizontal_blocks = (W + BLOCK_X - 1) / BLOCK_X;
+	// 	// TODO: in some cornor cases, todo==0 does not mean it is not computed locally.
+	// 	auto block_id = block.group_index().y * horizontal_blocks + block.group_index().x;
+	// 	compute_locally_this_tile = compute_locally[block_id];
+	// 	range_this_tile = ranges[block_id];
+	// }
+	// block.sync();
+	// if (!compute_locally_this_tile)
+	// 	return;
+
 	const uint2 pix_min = { block.group_index().x * BLOCK_X, block.group_index().y * BLOCK_Y };
 	const uint2 pix_max = { min(pix_min.x + BLOCK_X, W), min(pix_min.y + BLOCK_Y , H) };
 	const uint2 pix = { pix_min.x + block.thread_index().x, pix_min.y + block.thread_index().y };
@@ -425,16 +450,16 @@ renderCUDA(
 	const float2 pixf = { (float)pix.x, (float)pix.y };
 
 	const bool inside = pix.x < W&& pix.y < H;
-	const uint2 range = ranges[block.group_index().y * horizontal_blocks + block.group_index().x];
+	// method 1 and 2
+	const uint2 range = ranges[block_id];
+	// method 3
+	// const uint2 range = range_this_tile;
 
 	const int rounds = ((range.y - range.x + BLOCK_SIZE - 1) / BLOCK_SIZE);
 
 	bool done = !inside;
 	int toDo = range.y - range.x;
 
-	// if (!(compute_locally[block.group_index().y * horizontal_blocks + block.group_index().x] && inside))
-	// 	return;
-	// TODO: delete it; this is useless since toDo is 0; thus this thread will not do anything
 	// RuntimeError: CUDA error: an illegal memory access was encountered
 	// CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
 	// For debugging consider passing CUDA_LAUNCH_BLOCKING=1.

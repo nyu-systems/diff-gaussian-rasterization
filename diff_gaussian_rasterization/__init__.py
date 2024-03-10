@@ -172,6 +172,21 @@ def render_gaussians(
         cuda_args,
     )
 
+def get_extended_compute_locally(cuda_args, image_height, image_width):
+    local_rank = int(cuda_args["local_rank"])
+    dist_global_strategy = [int(x) for x in cuda_args["dist_global_strategy"].split(",")]
+
+    num_tile_y = (image_height + 16 - 1) // 16 #TODO: this is dangerous because 16 may change.
+    num_tile_x = (image_width + 16 - 1) // 16
+    tile_l = max(dist_global_strategy[local_rank]-num_tile_x-1, 0)
+    tile_r = min(dist_global_strategy[local_rank+1]+num_tile_x+1, num_tile_y*num_tile_x)
+
+    extended_compute_locally = torch.zeros(num_tile_y*num_tile_x, dtype=torch.bool, device="cuda")
+    extended_compute_locally[tile_l:tile_r] = True
+    extended_compute_locally = extended_compute_locally.view(num_tile_y, num_tile_x)
+
+    return extended_compute_locally
+
 class _RenderGaussians(torch.autograd.Function):
     @staticmethod
     def forward(
@@ -194,6 +209,10 @@ class _RenderGaussians(torch.autograd.Function):
         # Basically, means2D is (P, 3) in python. But it is (P, 2) in cuda code.
         # dL_dmeans2D is alwayds (P, 3) in both python and cuda code.
 
+        extended_compute_locally = get_extended_compute_locally(cuda_args,
+                                                                raster_settings.image_height,
+                                                                raster_settings.image_width)
+
         # Restructure arguments the way that the C++ lib expects them
         args = (
             raster_settings.bg,
@@ -204,7 +223,7 @@ class _RenderGaussians(torch.autograd.Function):
             radii,
             conic_opacity,
             rgb,# 3dgs intermediate results
-            compute_locally,
+            extended_compute_locally if cuda_args["avoid_pixel_all2all"] else compute_locally,
             raster_settings.debug,
             cuda_args
         )
@@ -215,7 +234,7 @@ class _RenderGaussians(torch.autograd.Function):
         ctx.raster_settings = raster_settings
         ctx.cuda_args = cuda_args
         ctx.num_rendered = num_rendered
-        ctx.save_for_backward(means2D, conic_opacity, rgb, geomBuffer, binningBuffer, imgBuffer, compute_locally)
+        ctx.save_for_backward(means2D, conic_opacity, rgb, geomBuffer, binningBuffer, imgBuffer, compute_locally, extended_compute_locally)
         ctx.mark_non_differentiable(n_render, n_consider, n_contrib)
 
         return color, n_render, n_consider, n_contrib
@@ -228,7 +247,7 @@ class _RenderGaussians(torch.autograd.Function):
         num_rendered = ctx.num_rendered
         raster_settings = ctx.raster_settings
         cuda_args = ctx.cuda_args
-        means2D, conic_opacity, rgb, geomBuffer, binningBuffer, imgBuffer, compute_locally = ctx.saved_tensors
+        means2D, conic_opacity, rgb, geomBuffer, binningBuffer, imgBuffer, compute_locally, extended_compute_locally = ctx.saved_tensors
 
         # Restructure args as C++ method expects them
         args = (raster_settings.bg,

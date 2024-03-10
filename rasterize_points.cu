@@ -409,7 +409,8 @@ __global__ void getTouchedIdsBool(
 	const float2* means2D,
 	const int* radii,// NOTE: radii is not const in getRect()
 	const int* dist_global_strategy,
-	bool* touchedIdsBool)
+	bool* touchedIdsBool,
+	bool avoid_pixel_all2all)
 {
 	auto i = cg::this_grid().thread_rank();
 	if (i < P)
@@ -430,6 +431,11 @@ __global__ void getTouchedIdsBool(
 		{
 			int tile_l = *(dist_global_strategy+rk);
 			int tile_r = *(dist_global_strategy+rk+1);
+			if (avoid_pixel_all2all) {
+				// we could avoid the pixel all2all by rendering the pixels that are near border and out of border. 
+				tile_l -= tile_grid.x+1;
+				tile_r += tile_grid.x+1;
+			}
 
 			if (touched_max_tile_idx < tile_l || touched_min_tile_idx >= tile_r)
 				continue;
@@ -457,6 +463,7 @@ torch::Tensor GetLocal2jIdsBoolCUDA(
 	const int P = means2D.size(0);
 	const int H = image_height;
 	const int W = image_width;
+	bool avoid_pixel_all2all = args["avoid_pixel_all2all"].cast<bool>();
 
 	torch::Tensor local2jIdsBool = torch::full({P, world_size}, false, means2D.options().dtype(torch::kBool));
 
@@ -468,7 +475,8 @@ torch::Tensor GetLocal2jIdsBoolCUDA(
 		reinterpret_cast<float2*>(means2D.contiguous().data<float>()),
 		radii.contiguous().data<int>(),
 		dist_global_strategy.contiguous().data<int>(),
-		local2jIdsBool.contiguous().data<bool>()
+		local2jIdsBool.contiguous().data<bool>(),
+		avoid_pixel_all2all
 	);
 
 	return local2jIdsBool;
