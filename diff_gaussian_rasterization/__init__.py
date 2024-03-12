@@ -13,6 +13,7 @@ from typing import NamedTuple
 import torch.nn as nn
 import torch
 from . import _C
+import time
 
 def cpu_deep_copy_tuple(input_tuple):
     copied_tensors = [item.cpu().clone() if isinstance(item, torch.Tensor) else item for item in input_tuple]
@@ -202,7 +203,7 @@ class _RenderGaussians(torch.autograd.Function):
     ):
 
         # means2D = means2D[:,:2].contiguous()
-        # TODO: double check.
+        # NOTE: double check.
         # means2D is padded to (P, 3) before being output from preprocess_gaussians.
         # because _RenderGaussians.backward will give dL_dmeans2D with shape (P, 3).
         # Here, because the means2D in cuda code is (P, 2), we need to remove the padding.
@@ -228,12 +229,19 @@ class _RenderGaussians(torch.autograd.Function):
             cuda_args
         )
 
+        # This time is to measure: render forward+loss forward+loss backward+render backward . And then used to do load balancing.
+        # Used when cuda_args["avoid_pixel_all2all"] is True.
+        # It is not useful for now.
+        # torch.cuda.synchronize()
+        # render_forward_start_time = time.time()
+
         num_rendered, color, n_render, n_consider, n_contrib, geomBuffer, binningBuffer, imgBuffer = _C.render_gaussians(*args)
 
         # Keep relevant tensors for backward
         ctx.raster_settings = raster_settings
         ctx.cuda_args = cuda_args
         ctx.num_rendered = num_rendered
+        # ctx.render_forward_start_time = render_forward_start_time
         ctx.save_for_backward(means2D, conic_opacity, rgb, geomBuffer, binningBuffer, imgBuffer, compute_locally, extended_compute_locally)
         ctx.mark_non_differentiable(n_render, n_consider, n_contrib)
 
@@ -247,6 +255,7 @@ class _RenderGaussians(torch.autograd.Function):
         num_rendered = ctx.num_rendered
         raster_settings = ctx.raster_settings
         cuda_args = ctx.cuda_args
+        # render_forward_start_time = ctx.render_forward_start_time
         means2D, conic_opacity, rgb, geomBuffer, binningBuffer, imgBuffer, compute_locally, extended_compute_locally = ctx.saved_tensors
 
         # Restructure args as C++ method expects them
@@ -264,6 +273,11 @@ class _RenderGaussians(torch.autograd.Function):
                 cuda_args)
 
         dL_dmeans2D, dL_dconic_opacity, dL_dcolors = _C.render_gaussians_backward(*args)
+
+        # Used when cuda_args["avoid_pixel_all2all"] is True.
+        # torch.cuda.synchronize()
+        # render_backward_end_time = time.time()
+        # cuda_args["stats_collector"]["pixelwise_workloads_time"] = (render_backward_end_time - render_forward_start_time)*1000
 
         # change dL_dmeans2D from (P, 3) to (P, 2)
         # dL_dmeans2D is now (P, 3) because of render backwards' cuda implementation.
