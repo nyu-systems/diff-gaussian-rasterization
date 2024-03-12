@@ -383,7 +383,9 @@ class GaussianRasterizer(nn.Module):
         return local2j_ids, local2j_ids_bool
 
     def get_distribution_strategy(self, means2D, radii, cuda_args):
-        
+
+        assert False, "This function is not used in the current version."
+
         raster_settings = self.raster_settings
 
         return _C.get_distribution_strategy(
