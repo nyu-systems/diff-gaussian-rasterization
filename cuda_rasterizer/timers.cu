@@ -51,12 +51,12 @@ public:
                 return a.first < b.first;
             }
         );
-        if (print_prefix) {
-            std::cout << prefix << std::endl;
-        }
-        for (const auto& pair : sortedTimes) {
-            std::cout << pair.first << " time: " << elapsedMilliseconds(pair.first, "sum") << " ms" << std::endl;
-        }
+        // if (print_prefix) {
+        //     std::cout << prefix << std::endl;
+        // }
+        // for (const auto& pair : sortedTimes) {
+        //     std::cout << pair.first << " time: " << elapsedMilliseconds(pair.first, "sum") << " ms" << std::endl;
+        // }
         //save in file
         FILE *fp;
         fp = fopen(filename, "a");

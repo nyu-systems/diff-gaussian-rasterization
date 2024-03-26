@@ -174,13 +174,13 @@ def render_gaussians(
     )
 
 def get_extended_compute_locally(cuda_args, image_height, image_width):
-    local_rank = int(cuda_args["local_rank"])
+    mp_rank = int(cuda_args["mp_rank"])
     dist_global_strategy = [int(x) for x in cuda_args["dist_global_strategy"].split(",")]
 
     num_tile_y = (image_height + 16 - 1) // 16 #TODO: this is dangerous because 16 may change.
     num_tile_x = (image_width + 16 - 1) // 16
-    tile_l = max(dist_global_strategy[local_rank]-num_tile_x-1, 0)
-    tile_r = min(dist_global_strategy[local_rank+1]+num_tile_x+1, num_tile_y*num_tile_x)
+    tile_l = max(dist_global_strategy[mp_rank]-num_tile_x-1, 0)
+    tile_r = min(dist_global_strategy[mp_rank+1]+num_tile_x+1, num_tile_y*num_tile_x)
 
     extended_compute_locally = torch.zeros(num_tile_y*num_tile_x, dtype=torch.bool, device="cuda")
     extended_compute_locally[tile_l:tile_r] = True
@@ -368,20 +368,20 @@ class GaussianRasterizer(nn.Module):
     def get_local2j_ids(self, means2D, radii, cuda_args):
 
         raster_settings = self.raster_settings
-        world_size = int(cuda_args["world_size"])
-        local_rank = int(cuda_args["local_rank"])
+        mp_world_size = int(cuda_args["mp_world_size"])
+        mp_rank = int(cuda_args["mp_rank"])
 
         # TODO: make it more general.
         dist_global_strategy = [int(x) for x in cuda_args["dist_global_strategy"].split(",")]
-        assert len(dist_global_strategy) == world_size+1, "dist_global_strategy should have length WORLD_SIZE+1"
+        assert len(dist_global_strategy) == mp_world_size+1, "dist_global_strategy should have length WORLD_SIZE+1"
         assert dist_global_strategy[0] == 0, "dist_global_strategy[0] should be 0"
         dist_global_strategy = torch.tensor(dist_global_strategy, dtype=torch.int, device=means2D.device)
 
         args = (
             raster_settings.image_height,
             raster_settings.image_width,
-            local_rank,
-            world_size,
+            mp_rank,
+            mp_world_size,
             means2D,
             radii,
             dist_global_strategy,
@@ -391,7 +391,7 @@ class GaussianRasterizer(nn.Module):
         local2j_ids_bool = _C.get_local2j_ids_bool(*args) # local2j_ids_bool is (P, world_size) bool tensor
 
         local2j_ids = []
-        for rk in range(world_size):
+        for rk in range(mp_world_size):
             local2j_ids.append(local2j_ids_bool[:, rk].nonzero())
 
         return local2j_ids, local2j_ids_bool

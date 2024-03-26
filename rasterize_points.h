@@ -170,8 +170,8 @@ RenderGaussiansBackwardCUDA(
 torch::Tensor GetLocal2jIdsBoolCUDA(
 	int image_height,
 	int image_width,
-	int local_rank,
-	int world_size,
+	int mp_rank,
+	int mp_world_size,
 	const torch::Tensor& means2D,
 	const torch::Tensor& radii,
 	const torch::Tensor& dist_global_strategy,

@@ -453,8 +453,8 @@ __global__ void getTouchedIdsBool(
 torch::Tensor GetLocal2jIdsBoolCUDA(
 	int image_height,
 	int image_width,
-	int local_rank,
-	int world_size,
+	int mp_rank,
+	int mp_world_size,
 	const torch::Tensor& means2D,
 	const torch::Tensor& radii,
 	const torch::Tensor& dist_global_strategy,
@@ -465,13 +465,13 @@ torch::Tensor GetLocal2jIdsBoolCUDA(
 	const int W = image_width;
 	bool avoid_pixel_all2all = args["avoid_pixel_all2all"].cast<bool>();
 
-	torch::Tensor local2jIdsBool = torch::full({P, world_size}, false, means2D.options().dtype(torch::kBool));
+	torch::Tensor local2jIdsBool = torch::full({P, mp_world_size}, false, means2D.options().dtype(torch::kBool));
 
 	getTouchedIdsBool << <(P + ONE_DIM_BLOCK_SIZE - 1) / ONE_DIM_BLOCK_SIZE, ONE_DIM_BLOCK_SIZE >> >(
 		P,
 		H,
 		W,
-		world_size,
+		mp_world_size,
 		reinterpret_cast<float2*>(means2D.contiguous().data<float>()),
 		radii.contiguous().data<int>(),
 		dist_global_strategy.contiguous().data<int>(),
