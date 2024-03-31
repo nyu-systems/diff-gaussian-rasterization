@@ -483,7 +483,83 @@ torch::Tensor GetLocal2jIdsBoolCUDA(
 }
 
 
+__global__ void getTouchedIdsBoolAdjustMode6(
+	int P,
+	int height,
+	int width,
+	int world_size,
+	const float2* means2D,
+	const int* radii,// NOTE: radii is not const in getRect()
+	const int* rectangles,
+	bool* touchedIdsBool,
+	bool avoid_pixel_all2all)
+{
+	auto i = cg::this_grid().thread_rank();
+	if (i < P)
+	{
+		uint2 rect_min, rect_max;
+		dim3 tile_grid((width + BLOCK_X - 1) / BLOCK_X, (height + BLOCK_Y - 1) / BLOCK_Y, 1);
 
+		getRect(means2D[i], radii[i], rect_min, rect_max, tile_grid);
+
+		for (int rk = 0; rk < world_size; rk++)
+		{
+			// local_tile_y_l, local_tile_y_r, local_tile_x_l, local_tile_x_r
+			const int* rectangles_offset = rectangles+(rk*4);
+			int local_tile_y_l = *(rectangles_offset);
+			int local_tile_y_r = *(rectangles_offset+1);
+			int local_tile_x_l = *(rectangles_offset+2);
+			int local_tile_x_r = *(rectangles_offset+3);
+
+
+
+			if (avoid_pixel_all2all) {
+				if (local_tile_y_l>0) local_tile_y_l-=1;
+				if (local_tile_x_l>0) local_tile_x_l-=1;//WERID: If local_tile_x_l changes to -1, then it gives weird behavior and I have not figure it out yet. 
+				local_tile_y_r+=1;
+				local_tile_x_r+=1;
+			}
+			if (rect_max.y <= local_tile_y_l || 
+				local_tile_y_r <= rect_min.y || 
+				rect_max.x <= local_tile_x_l || 
+				local_tile_x_r <= rect_min.x) continue;
+
+			touchedIdsBool[i * world_size + rk] = true;
+		}
+	}
+}
+
+torch::Tensor GetLocal2jIdsBoolAdjustMode6CUDA(
+	int image_height,
+	int image_width,
+	int mp_rank,
+	int mp_world_size,
+	const torch::Tensor& means2D,
+	const torch::Tensor& radii,
+	const torch::Tensor& rectangles,
+	const pybind11::dict &args)
+{
+	const int P = means2D.size(0);
+	const int H = image_height;
+	const int W = image_width;
+	bool avoid_pixel_all2all = args["avoid_pixel_all2all"].cast<bool>();
+
+	torch::Tensor local2jIdsBool = torch::full({P, mp_world_size}, false, means2D.options().dtype(torch::kBool));
+
+	getTouchedIdsBoolAdjustMode6 << <(P + ONE_DIM_BLOCK_SIZE - 1) / ONE_DIM_BLOCK_SIZE, ONE_DIM_BLOCK_SIZE >> >(
+		P,
+		H,
+		W,
+		mp_world_size,
+		reinterpret_cast<float2*>(means2D.contiguous().data<float>()),
+		radii.contiguous().data<int>(),
+		rectangles.contiguous().data<int>(),
+		local2jIdsBool.contiguous().data<bool>(),
+		avoid_pixel_all2all
+	);
+
+	return local2jIdsBool;
+}
 
 
 
