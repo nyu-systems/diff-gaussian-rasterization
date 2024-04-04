@@ -542,7 +542,7 @@ int CudaRasterizer::Rasterizer::renderForward(
 	char* chunkptr = geometryBuffer(chunk_size);
 	GeometryState geomState = GeometryState::fromChunk(chunkptr, P, true); // do not allocate extra memory here if sep_rendering==True.
 
-	dim3 tile_grid((width + BLOCK_X - 1) / BLOCK_X, (height + BLOCK_Y - 1) / BLOCK_Y, 1);
+	dim3 tile_grid(cdiv(width, BLOCK_X), cdiv(height, BLOCK_Y), 1);
 	dim3 block(BLOCK_X, BLOCK_Y, 1);
 	int tile_num = tile_grid.x * tile_grid.y;
 
@@ -553,7 +553,7 @@ int CudaRasterizer::Rasterizer::renderForward(
 
 	timer.start("24 updateDistributedStatLocally.updateTileTouched");
 	// For sep_rendering==True case (here), we only compute tiles_touched in the renderForward.
-	updateTileTouched <<<(P + ONE_DIM_BLOCK_SIZE - 1) / ONE_DIM_BLOCK_SIZE, ONE_DIM_BLOCK_SIZE >>> (
+	updateTileTouched <<<cdiv(P, ONE_DIM_BLOCK_SIZE), ONE_DIM_BLOCK_SIZE >>> (
 		P,
 		tile_grid,
 		radii,
@@ -580,7 +580,7 @@ int CudaRasterizer::Rasterizer::renderForward(
 	timer.start("40 duplicateWithKeys");
 	// For each instance to be rendered, produce adequate [ tile | depth ] key 
 	// and corresponding dublicated Gaussian indices to be sorted
-	duplicateWithKeys << <(P + ONE_DIM_BLOCK_SIZE - 1) / ONE_DIM_BLOCK_SIZE, ONE_DIM_BLOCK_SIZE >> > (
+	duplicateWithKeys << <cdiv(P, ONE_DIM_BLOCK_SIZE), ONE_DIM_BLOCK_SIZE >> > (
 		P,
 		means2D,
 		depths,
@@ -610,7 +610,7 @@ int CudaRasterizer::Rasterizer::renderForward(
 	timer.start("60 identifyTileRanges");
 	// Identify start and end of per-tile workloads in sorted list
 	if (num_rendered > 0)
-		identifyTileRanges << <(num_rendered + ONE_DIM_BLOCK_SIZE - 1) / ONE_DIM_BLOCK_SIZE, ONE_DIM_BLOCK_SIZE >> > (
+		identifyTileRanges << <cdiv(num_rendered, ONE_DIM_BLOCK_SIZE), ONE_DIM_BLOCK_SIZE >> > (
 			num_rendered,
 			binningState.point_list_keys,
 			imgState.ranges);

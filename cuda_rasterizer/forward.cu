@@ -323,7 +323,7 @@ renderCUDA(
 	// method 3
 	// uint2 range = range_this_tile;
 
-	const int rounds = ((range.y - range.x + BLOCK_SIZE - 1) / BLOCK_SIZE);
+	const int rounds = cdiv(range.y - range.x, BLOCK_SIZE);
 	int toDo = range.y - range.x;
 
 	// Allocate storage for batches of collectively fetched data.
