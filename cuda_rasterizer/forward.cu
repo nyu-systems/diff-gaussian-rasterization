@@ -286,8 +286,10 @@ renderCUDA(
 	// method 2: this seems to be faster than others, in set of experiments: fix_com_loc_flc_1/2/3
 	uint32_t horizontal_blocks = (W + BLOCK_X - 1) / BLOCK_X;
 	auto block_id = block.group_index().y * horizontal_blocks + block.group_index().x;
-	if (!compute_locally[block_id])
-		return;
+	if (!compute_locally[block_id]) {
+		printf("block_id: %d, compute_locally: %d\n", block_id, compute_locally[block_id]);
+        return;
+    }
 
 	// method 3
 	// __shared__ bool compute_locally_this_tile;
