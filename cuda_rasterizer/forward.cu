@@ -285,8 +285,8 @@ renderCUDA(
 	// auto block_id = block.group_index().y * horizontal_blocks + block.group_index().x;
 
 	// method 2: this seems to be faster than others, in set of experiments: fix_com_loc_flc_1/2/3
-	auto block_id = block.group_index().x;
-    auto block_id_2d = compute_locally_1D_2D_map[block_id];
+	auto block_id_1d = block.group_index().x;
+    auto block_id = compute_locally_1D_2D_map[block_id_1d];
 
     //method2.1
 
@@ -305,8 +305,8 @@ renderCUDA(
 	// if (!compute_locally_this_tile)
 	// 	return;
 
-    int block_id_x = block2d_xys[block_id].x;
-    int block_id_y = block2d_xys[block_id].y;
+    int block_id_x = block2d_xys[block_id_1d].x;
+    int block_id_y = block2d_xys[block_id_1d].y;
 
 	// uint2 pix_min = { block.group_index().x * BLOCK_X, block.group_index().y * BLOCK_Y };
     uint2 pix_min = { block_id_x * BLOCK_X, block_id_y * BLOCK_Y };
