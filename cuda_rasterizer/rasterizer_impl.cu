@@ -649,7 +649,7 @@ int CudaRasterizer::Rasterizer::renderForward(
         compute_locally,
         compute_locally_1D_2D_map,
         block2d_xys,
-        tile_grid
+        tile_grid,
         dev_count
     );
 

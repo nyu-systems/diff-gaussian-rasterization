@@ -273,7 +273,7 @@ renderCUDA(
 	uint32_t* __restrict__ n_contrib,
 	uint32_t* __restrict__ n_contrib2loss,
 	bool* __restrict__ compute_locally,
-    int* __restrict__ compute_locally_1D_2D_map;
+    int* __restrict__ compute_locally_1D_2D_map,
     uint2* __restrict__ block2d_xys,
 	const float* __restrict__ bg_color,
 	float* __restrict__ out_color)
