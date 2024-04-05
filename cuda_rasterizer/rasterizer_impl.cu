@@ -644,7 +644,7 @@ int CudaRasterizer::Rasterizer::renderForward(
     CHECK_CUDA(cudaMemcpy(dev_count, &count, sizeof(int), cudaMemcpyHostToDevice), debug);
 
     // Perform the mapping on the device side
-    map2DcomputelocallyTo1D<<<(tile_num + 255) / 256, 256>>>(
+    map2DcomputelocallyTo1D<<<cdiv(tile_num, ONE_DIM_BLOCK_SIZE), ONE_DIM_BLOCK_SIZE>>>(
         tile_num,
         compute_locally,
         compute_locally_1D_2D_map,
@@ -674,7 +674,6 @@ int CudaRasterizer::Rasterizer::renderForward(
 		imgState.accum_alpha,
 		imgState.n_contrib,
 		imgState.n_contrib2loss,
-		compute_locally,
         compute_locally_1D_2D_map,
         block2d_xys,
 		background,
@@ -799,6 +798,9 @@ int CudaRasterizer::Rasterizer::renderForward(
 	}
 
 	delete[] log_tmp;
+    CHECK_CUDA(cudaFree(compute_locally_1D_2D_map), debug);
+    CHECK_CUDA(cudaFree(block2d_xys), debug);
+    CHECK_CUDA(cudaFree(dev_count), debug);
 	return num_rendered;
 }
 

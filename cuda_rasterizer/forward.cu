@@ -272,7 +272,6 @@ renderCUDA(
 	float* __restrict__ final_T,
 	uint32_t* __restrict__ n_contrib,
 	uint32_t* __restrict__ n_contrib2loss,
-	bool* __restrict__ compute_locally,
     int* __restrict__ compute_locally_1D_2D_map,
     uint2* __restrict__ block2d_xys,
 	const float* __restrict__ bg_color,
@@ -288,10 +287,6 @@ renderCUDA(
 	// method 2: this seems to be faster than others, in set of experiments: fix_com_loc_flc_1/2/3
 	auto block_id = block.group_index().x;
     auto block_id_2d = compute_locally_1D_2D_map[block_id];
-    if (!compute_locally[block_id_2d]) {
-		printf("block_id: %d, compute_locally: %d\n", block_id, compute_locally[block_id]);
-        return;
-    }
 
     //method2.1
 
@@ -432,7 +427,6 @@ void FORWARD::render(
 	float* final_T,
 	uint32_t* n_contrib,
 	uint32_t* n_contrib2loss,
-	bool* compute_locally,
     int* compute_locally_1D_2D_map,
     uint2* block2d_xys,
 	const float* bg_color,
@@ -448,7 +442,6 @@ void FORWARD::render(
 		final_T,
 		n_contrib,
 		n_contrib2loss,
-		compute_locally,
         compute_locally_1D_2D_map,
         block2d_xys,
 		bg_color,
