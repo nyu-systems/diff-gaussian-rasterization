@@ -60,6 +60,8 @@ namespace FORWARD
 		uint32_t* n_contrib,
 		uint32_t* n_contrib2loss,
 		bool* compute_locally,
+        int* compute_locally_1D_2D_map,
+        uint2* block2d_xys,
 		const float* bg_color,
 		float* out_color);
 }

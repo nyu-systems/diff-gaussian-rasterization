@@ -511,7 +511,23 @@ void CudaRasterizer::Rasterizer::getDistributionStrategy(
 /////////////////////////////// Render ///////////////////////////////
 
 
-
+__global__ void map2DcomputelocallyTo1D(
+    int tile_num,
+    const bool* compute_locally,
+    int* compute_locally_1D_2D_map,
+    uint2* block2d_xys,
+    dim3 grid,
+    int* count
+) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < tile_num) {
+        if (compute_locally[i]) {
+            int j = atomicAdd(count, 1);
+            compute_locally_1D_2D_map[j] = i;
+            block2d_xys[j] = make_uint2(i % grid.x, i / grid.x);
+        }
+    }
+}
 
 int CudaRasterizer::Rasterizer::renderForward(
 	std::function<char* (size_t)> geometryBuffer,
@@ -618,28 +634,37 @@ int CudaRasterizer::Rasterizer::renderForward(
 	timer.stop("60 identifyTileRanges");
 
 	timer.start("61 map2DcomputelocallyTo1D");
-    // count number of true values in compute_locally
     int count = 0;
     int* compute_locally_1D_2D_map;
+    int* dev_count;
+    uint2* block2d_xys; 
     CHECK_CUDA(cudaMalloc(&compute_locally_1D_2D_map, tile_num * sizeof(int)), debug);
+    CHECK_CUDA(cudaMalloc(&block2d_xys, tile_num * sizeof(uint2)), debug);
+    CHECK_CUDA(cudaMalloc(&dev_count, sizeof(int)), debug);
+    CHECK_CUDA(cudaMemcpy(dev_count, &count, sizeof(int), cudaMemcpyHostToDevice), debug);
 
-    for (int i = 0, j = 0; i < tile_num; i++) {
-        if (compute_locally[i]) {
-            compute_locally_1D_2D_map[j] = i;
-            j++;
-            count++;
-        }
-    }
-    
+    // Perform the mapping on the device side
+    map2DcomputelocallyTo1D<<<(tile_num + 255) / 256, 256>>>(
+        tile_num,
+        compute_locally,
+        compute_locally_1D_2D_map,
+        block2d_xys,
+        tile_grid
+        dev_count
+    );
+
     // Use 'count' for further computations
-    dim3 tile_grid_1d(count);
+    int host_count;
+    CHECK_CUDA(cudaMemcpy(&host_count, dev_count, sizeof(int), cudaMemcpyDeviceToHost), debug);
+    dim3 tile_grid_1d(host_count, 1, 1);
+
     timer.stop("61 map2DcomputelocallyTo1D");
 
     // Let each tile blend its range of Gaussians independently in parallel
 	const float* feature_ptr = rgb;
 	timer.start("70 render");
 	CHECK_CUDA(FORWARD::render(//TODO: only deal with local tiles. do not even load other tiles.
-		tile_grid, block,
+		tile_grid_1d, block,
 		imgState.ranges,
 		binningState.point_list,
 		width, height,
@@ -650,6 +675,8 @@ int CudaRasterizer::Rasterizer::renderForward(
 		imgState.n_contrib,
 		imgState.n_contrib2loss,
 		compute_locally,
+        compute_locally_1D_2D_map,
+        block2d_xys,
 		background,
 		out_color), debug)
 	timer.stop("70 render");
