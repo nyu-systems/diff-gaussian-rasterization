@@ -284,8 +284,8 @@ renderCUDA(
 	// auto block_id = block.group_index().y * horizontal_blocks + block.group_index().x;
 
 	// method 2: this seems to be faster than others, in set of experiments: fix_com_loc_flc_1/2/3
-	auto block_id_1d = block.group_index().x;
-    auto block_id = compute_locally_1D_2D_map[block_id_1d];
+	const int block_id_1d = block.group_index().x;
+    const int block_id = compute_locally_1D_2D_map[block_id_1d];
 
     //method2.1
 
@@ -304,16 +304,15 @@ renderCUDA(
 	// if (!compute_locally_this_tile)
 	// 	return;
 
-    uint2 tile_grid = { cdiv(W, BLOCK_X), cdiv(H, BLOCK_Y) }; 
-    int block_id_x = block_id % tile_grid.x;
-    int block_id_y = block_id / tile_grid.x;
+    const uint2 tile_grid = { cdiv(W, BLOCK_X), cdiv(H, BLOCK_Y) }; 
+    const int block_id_x = block_id % tile_grid.x;
+    const int block_id_y = block_id / tile_grid.x;
 
-	// uint2 pix_min = { block.group_index().x * BLOCK_X, block.group_index().y * BLOCK_Y };
-    uint2 pix_min = { block_id_x * BLOCK_X, block_id_y * BLOCK_Y };
-	uint2 pix_max = { min(pix_min.x + BLOCK_X, W), min(pix_min.y + BLOCK_Y , H) };
-	uint2 pix = { pix_min.x + block.thread_index().x, pix_min.y + block.thread_index().y };
-	uint32_t pix_id = W * pix.y + pix.x;
-	float2 pixf = { (float)pix.x, (float)pix.y };
+    const uint2 pix_min = { block_id_x * BLOCK_X, block_id_y * BLOCK_Y };
+	const uint2 pix_max = { min(pix_min.x + BLOCK_X, W), min(pix_min.y + BLOCK_Y , H) };
+	const uint2 pix = { pix_min.x + block.thread_index().x, pix_min.y + block.thread_index().y };
+	const uint32_t pix_id = W * pix.y + pix.x;
+	const float2 pixf = { (float)pix.x, (float)pix.y };
 
 	// Check if this thread is associated with a valid pixel or outside.
 	bool inside = pix.x < W&& pix.y < H;
