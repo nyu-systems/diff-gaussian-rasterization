@@ -648,10 +648,8 @@ int CudaRasterizer::Rasterizer::renderForward(
         dev_count
     );
 
-    // Use 'count' for further computations
-    int host_count;
-    CHECK_CUDA(cudaMemcpy(&host_count, dev_count, sizeof(int), cudaMemcpyDeviceToHost), debug);
-    dim3 tile_grid_1d(host_count, 1, 1);
+    CHECK_CUDA(cudaMemcpy(&count, dev_count, sizeof(int), cudaMemcpyDeviceToHost), debug);
+    dim3 tile_grid_1d(count, 1, 1);
 
     timer.stop("61 map2DcomputelocallyTo1D");
 
