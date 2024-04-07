@@ -793,7 +793,6 @@ int CudaRasterizer::Rasterizer::renderForward(
 
 	delete[] log_tmp;
     CHECK_CUDA(cudaFree(compute_locally_1D_2D_map), debug);
-    CHECK_CUDA(cudaFree(block2d_xys), debug);
     CHECK_CUDA(cudaFree(dev_count), debug);
 	return num_rendered;
 }
