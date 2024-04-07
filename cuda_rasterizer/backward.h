@@ -31,7 +31,7 @@ namespace BACKWARD
 		const float* colors,
 		const float* final_Ts,
 		const uint32_t* n_contrib,
-		const bool* compute_locally,
+		const int* compute_locally_1D_2D_map,
 		const float* dL_dpixels,
 		float3* dL_dmean2D,
 		float4* dL_dconic2D,
