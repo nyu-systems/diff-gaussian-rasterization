@@ -273,7 +273,6 @@ renderCUDA(
 	uint32_t* __restrict__ n_contrib,
 	uint32_t* __restrict__ n_contrib2loss,
     int* __restrict__ compute_locally_1D_2D_map,
-    uint2* __restrict__ block2d_xys,
 	const float* __restrict__ bg_color,
 	float* __restrict__ out_color)
 {
@@ -305,8 +304,9 @@ renderCUDA(
 	// if (!compute_locally_this_tile)
 	// 	return;
 
-    int block_id_x = block2d_xys[block_id_1d].x;
-    int block_id_y = block2d_xys[block_id_1d].y;
+    uint2 tile_grid = { cdiv(W, BLOCK_X), cdiv(H, BLOCK_Y) }; 
+    int block_id_x = block_id % tile_grid.x;
+    int block_id_y = block_id / tile_grid.x;
 
 	// uint2 pix_min = { block.group_index().x * BLOCK_X, block.group_index().y * BLOCK_Y };
     uint2 pix_min = { block_id_x * BLOCK_X, block_id_y * BLOCK_Y };
@@ -428,7 +428,6 @@ void FORWARD::render(
 	uint32_t* n_contrib,
 	uint32_t* n_contrib2loss,
     int* compute_locally_1D_2D_map,
-    uint2* block2d_xys,
 	const float* bg_color,
 	float* out_color)
 {
@@ -443,7 +442,6 @@ void FORWARD::render(
 		n_contrib,
 		n_contrib2loss,
         compute_locally_1D_2D_map,
-        block2d_xys,
 		bg_color,
 		out_color);
 }

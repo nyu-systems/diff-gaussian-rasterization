@@ -515,7 +515,6 @@ __global__ void map2DcomputelocallyTo1D(
     int tile_num,
     const bool* compute_locally,
     int* compute_locally_1D_2D_map,
-    uint2* block2d_xys,
     dim3 grid,
     int* count
 ) {
@@ -524,7 +523,6 @@ __global__ void map2DcomputelocallyTo1D(
         if (compute_locally[i]) {
             int j = atomicAdd(count, 1);
             compute_locally_1D_2D_map[j] = i;
-            block2d_xys[j] = make_uint2(i % grid.x, i / grid.x);
         }
     }
 }
@@ -637,9 +635,7 @@ int CudaRasterizer::Rasterizer::renderForward(
     int count = 0;
     int* compute_locally_1D_2D_map;
     int* dev_count;
-    uint2* block2d_xys; 
     CHECK_CUDA(cudaMalloc(&compute_locally_1D_2D_map, tile_num * sizeof(int)), debug);
-    CHECK_CUDA(cudaMalloc(&block2d_xys, tile_num * sizeof(uint2)), debug);
     CHECK_CUDA(cudaMalloc(&dev_count, sizeof(int)), debug);
     CHECK_CUDA(cudaMemcpy(dev_count, &count, sizeof(int), cudaMemcpyHostToDevice), debug);
 
@@ -648,7 +644,6 @@ int CudaRasterizer::Rasterizer::renderForward(
         tile_num,
         compute_locally,
         compute_locally_1D_2D_map,
-        block2d_xys,
         tile_grid,
         dev_count
     );
@@ -675,7 +670,6 @@ int CudaRasterizer::Rasterizer::renderForward(
 		imgState.n_contrib,
 		imgState.n_contrib2loss,
         compute_locally_1D_2D_map,
-        block2d_xys,
 		background,
 		out_color), debug)
 	timer.stop("70 render");
