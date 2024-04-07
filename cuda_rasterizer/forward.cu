@@ -272,7 +272,7 @@ renderCUDA(
 	float* __restrict__ final_T,
 	uint32_t* __restrict__ n_contrib,
 	uint32_t* __restrict__ n_contrib2loss,
-    int* __restrict__ compute_locally_1D_2D_map,
+    const int* __restrict__ compute_locally_1D_2D_map,
 	const float* __restrict__ bg_color,
 	float* __restrict__ out_color)
 {
@@ -426,7 +426,7 @@ void FORWARD::render(
 	float* final_T,
 	uint32_t* n_contrib,
 	uint32_t* n_contrib2loss,
-    int* compute_locally_1D_2D_map,
+    const int* compute_locally_1D_2D_map,
 	const float* bg_color,
 	float* out_color)
 {
