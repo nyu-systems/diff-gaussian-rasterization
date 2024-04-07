@@ -825,6 +825,29 @@ void CudaRasterizer::Rasterizer::renderBackward(
 
 	const dim3 tile_grid((width + BLOCK_X - 1) / BLOCK_X, (height + BLOCK_Y - 1) / BLOCK_Y, 1);
 	const dim3 block(BLOCK_X, BLOCK_Y, 1);
+    const int tile_num = tile_grid.x * tile_grid.y;
+
+    timer.start("61 map2DcomputelocallyTo1D");
+    int count = 0;
+    int* compute_locally_1D_2D_map;
+    int* dev_count;
+    CHECK_CUDA(cudaMalloc(&compute_locally_1D_2D_map, tile_num * sizeof(int)), debug);
+    CHECK_CUDA(cudaMalloc(&dev_count, sizeof(int)), debug);
+    CHECK_CUDA(cudaMemcpy(dev_count, &count, sizeof(int), cudaMemcpyHostToDevice), debug);
+
+    // Perform the mapping on the device side
+    map2DcomputelocallyTo1D<<<cdiv(tile_num, ONE_DIM_BLOCK_SIZE), ONE_DIM_BLOCK_SIZE>>>(
+        tile_num,
+        compute_locally,
+        compute_locally_1D_2D_map,
+        tile_grid,
+        dev_count
+    );
+
+    CHECK_CUDA(cudaMemcpy(&count, dev_count, sizeof(int), cudaMemcpyDeviceToHost), debug);
+    dim3 tile_grid_1d(count, 1, 1);
+
+    timer.stop("61 map2DcomputelocallyTo1D");
 
 	// Compute loss gradients w.r.t. 2D mean position, conic matrix,
 	// opacity and RGB of Gaussians from per-pixel loss gradients.
@@ -832,7 +855,7 @@ void CudaRasterizer::Rasterizer::renderBackward(
 	const float* color_ptr = rgb;
 	timer.start("b10 render");
 	CHECK_CUDA(BACKWARD::render(
-		tile_grid,
+		tile_grid_1d,
 		block,
 		imgState.ranges,
 		binningState.point_list,
@@ -843,7 +866,7 @@ void CudaRasterizer::Rasterizer::renderBackward(
 		color_ptr,
 		imgState.accum_alpha,
 		imgState.n_contrib,
-		compute_locally,
+		compute_locally_1D_2D_map,
 		dL_dpix,
 		(float3*)dL_dmean2D,
 		(float4*)dL_dconic,
@@ -859,4 +882,8 @@ void CudaRasterizer::Rasterizer::renderBackward(
 	if (zhx_time && iteration % log_interval == 1) {
 		timer.printAllTimes(iteration, world_size, global_rank, log_folder, false);
 	}
+
+    // Free used memory
+    CHECK_CUDA(cudaFree(compute_locally_1D_2D_map), debug);
+    CHECK_CUDA(cudaFree(dev_count), debug);
 }
