@@ -174,40 +174,19 @@ def render_gaussians(
     )
 
 def get_extended_compute_locally(cuda_args, image_height, image_width):
-    if isinstance(cuda_args["dist_global_strategy"], str):
-        mp_rank = int(cuda_args["mp_rank"])
-        dist_global_strategy = [int(x) for x in cuda_args["dist_global_strategy"].split(",")]
+    local_rank = int(cuda_args["local_rank"])
+    dist_global_strategy = [int(x) for x in cuda_args["dist_global_strategy"].split(",")]
 
-        num_tile_y = (image_height + 16 - 1) // 16 #TODO: this is dangerous because 16 may change.
-        num_tile_x = (image_width + 16 - 1) // 16
-        tile_l = max(dist_global_strategy[mp_rank]-num_tile_x-1, 0)
-        tile_r = min(dist_global_strategy[mp_rank+1]+num_tile_x+1, num_tile_y*num_tile_x)
+    num_tile_y = (image_height + 16 - 1) // 16 #TODO: this is dangerous because 16 may change.
+    num_tile_x = (image_width + 16 - 1) // 16
+    tile_l = max(dist_global_strategy[local_rank]-num_tile_x-1, 0)
+    tile_r = min(dist_global_strategy[local_rank+1]+num_tile_x+1, num_tile_y*num_tile_x)
 
-        extended_compute_locally = torch.zeros(num_tile_y*num_tile_x, dtype=torch.bool, device="cuda")
-        extended_compute_locally[tile_l:tile_r] = True
-        extended_compute_locally = extended_compute_locally.view(num_tile_y, num_tile_x)
+    extended_compute_locally = torch.zeros(num_tile_y*num_tile_x, dtype=torch.bool, device="cuda")
+    extended_compute_locally[tile_l:tile_r] = True
+    extended_compute_locally = extended_compute_locally.view(num_tile_y, num_tile_x)
 
-        return extended_compute_locally
-    else:
-        division_pos = cuda_args["dist_global_strategy"]
-        division_pos_xs, division_pos_ys = division_pos
-        mp_rank = int(cuda_args["mp_rank"])
-        grid_size_x = len(division_pos_xs) - 1
-        grid_size_y = len(division_pos_ys[0]) - 1
-        y_rank = mp_rank // grid_size_x
-        x_rank = mp_rank % grid_size_x
-
-        local_tile_x_l, local_tile_x_r = division_pos_xs[x_rank], division_pos_xs[x_rank+1]
-        local_tile_y_l, local_tile_y_r = division_pos_ys[x_rank][y_rank], division_pos_ys[x_rank][y_rank+1]
-
-        num_tile_y = (image_height + 16 - 1) // 16
-        num_tile_x = (image_width + 16 - 1) // 16
-
-        extended_compute_locally = torch.zeros((num_tile_y, num_tile_x), dtype=torch.bool, device="cuda")
-        extended_compute_locally[max(local_tile_y_l-1,0):min(local_tile_y_r+1,num_tile_y),
-                                 max(local_tile_x_l-1,0):min(local_tile_x_r+1,num_tile_x)] = True
-
-        return extended_compute_locally
+    return extended_compute_locally
 
 class _RenderGaussians(torch.autograd.Function):
     @staticmethod
@@ -388,65 +367,34 @@ class GaussianRasterizer(nn.Module):
 
     def get_local2j_ids(self, means2D, radii, cuda_args):
 
-        if isinstance(cuda_args["dist_global_strategy"], str):
-            raster_settings = self.raster_settings
-            mp_world_size = int(cuda_args["mp_world_size"])
-            mp_rank = int(cuda_args["mp_rank"])
+        raster_settings = self.raster_settings
+        world_size = int(cuda_args["world_size"])
+        local_rank = int(cuda_args["local_rank"])
 
-            # TODO: make it more general.
-            dist_global_strategy = [int(x) for x in cuda_args["dist_global_strategy"].split(",")]
-            assert len(dist_global_strategy) == mp_world_size+1, "dist_global_strategy should have length WORLD_SIZE+1"
-            assert dist_global_strategy[0] == 0, "dist_global_strategy[0] should be 0"
-            dist_global_strategy = torch.tensor(dist_global_strategy, dtype=torch.int, device=means2D.device)
+        # TODO: make it more general.
+        dist_global_strategy = [int(x) for x in cuda_args["dist_global_strategy"].split(",")]
+        assert len(dist_global_strategy) == world_size+1, "dist_global_strategy should have length WORLD_SIZE+1"
+        assert dist_global_strategy[0] == 0, "dist_global_strategy[0] should be 0"
+        dist_global_strategy = torch.tensor(dist_global_strategy, dtype=torch.int, device=means2D.device)
 
-            args = (
-                raster_settings.image_height,
-                raster_settings.image_width,
-                mp_rank,
-                mp_world_size,
-                means2D,
-                radii,
-                dist_global_strategy,
-                cuda_args
-            )
+        args = (
+            raster_settings.image_height,
+            raster_settings.image_width,
+            local_rank,
+            world_size,
+            means2D,
+            radii,
+            dist_global_strategy,
+            cuda_args
+        )
 
-            local2j_ids_bool = _C.get_local2j_ids_bool(*args) # local2j_ids_bool is (P, world_size) bool tensor
-
-        else:
-            raster_settings = self.raster_settings
-            mp_world_size = int(cuda_args["mp_world_size"])
-            mp_rank = int(cuda_args["mp_rank"])
-
-            division_pos = cuda_args["dist_global_strategy"]
-            division_pos_xs, division_pos_ys = division_pos
-
-            rectangles = []
-            for y_rank in range(len(division_pos_ys[0])-1):
-                for x_rank in range(len(division_pos_ys)):
-                    local_tile_x_l, local_tile_x_r = division_pos_xs[x_rank], division_pos_xs[x_rank+1]
-                    local_tile_y_l, local_tile_y_r = division_pos_ys[x_rank][y_rank], division_pos_ys[x_rank][y_rank+1]
-                    rectangles.append([local_tile_y_l, local_tile_y_r, local_tile_x_l, local_tile_x_r])
-            rectangles = torch.tensor(rectangles, dtype=torch.int, device=means2D.device)# (mp_world_size, 4)
-
-            args = (
-                raster_settings.image_height,
-                raster_settings.image_width,
-                mp_rank,
-                mp_world_size,
-                means2D,
-                radii,
-                rectangles,
-                cuda_args
-            )
-
-            local2j_ids_bool = _C.get_local2j_ids_bool_adjust_mode6(*args) # local2j_ids_bool is (P, world_size) bool tensor
+        local2j_ids_bool = _C.get_local2j_ids_bool(*args) # local2j_ids_bool is (P, world_size) bool tensor
 
         local2j_ids = []
-        for rk in range(mp_world_size):
+        for rk in range(world_size):
             local2j_ids.append(local2j_ids_bool[:, rk].nonzero())
 
         return local2j_ids, local2j_ids_bool
-
 
     def get_distribution_strategy(self, means2D, radii, cuda_args):
 

@@ -178,7 +178,9 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float4* conic_opacity,
 	const dim3 grid,
 	uint32_t* tiles_touched,
-	bool prefiltered)
+	bool prefiltered,
+	int local_rank,
+	int world_size)
 {
 	auto idx = cg::this_grid().thread_rank();
 	if (idx >= P)
@@ -272,7 +274,8 @@ renderCUDA(
 	float* __restrict__ final_T,
 	uint32_t* __restrict__ n_contrib,
 	uint32_t* __restrict__ n_contrib2loss,
-	bool* __restrict__ compute_locally,
+	// bool* __restrict__ compute_locally,
+	uint2* __restrict__ d_mapping,
 	const float* __restrict__ bg_color,
 	float* __restrict__ out_color)
 {
@@ -285,9 +288,12 @@ renderCUDA(
 
 	// method 2: this seems to be faster than others, in set of experiments: fix_com_loc_flc_1/2/3
 	uint32_t horizontal_blocks = (W + BLOCK_X - 1) / BLOCK_X;
-	auto block_id = block.group_index().y * horizontal_blocks + block.group_index().x;
-	if (!compute_locally[block_id])
-		return;
+	auto block_id_1d= block.group_index().x;
+	//  = block.group_index().y * horizontal_blocks + block.group_index().x;
+	auto block_id_2d=d_mapping[block_id_1d];
+	auto block_id=block_id_2d.x*horizontal_blocks;
+	// if (!compute_locally[block_id])
+	// 	return;
 
 	// method 3
 	// __shared__ bool compute_locally_this_tile;
@@ -305,9 +311,9 @@ renderCUDA(
 	// 	return;
 
 
-	uint2 pix_min = { block.group_index().x * BLOCK_X, block.group_index().y * BLOCK_Y };
+	uint2 pix_min = { block_id_2d.x * BLOCK_X, block_id_2d.y * BLOCK_Y };
 	uint2 pix_max = { min(pix_min.x + BLOCK_X, W), min(pix_min.y + BLOCK_Y , H) };
-	uint2 pix = { pix_min.x + block.thread_index().x, pix_min.y + block.thread_index().y };
+	uint2 pix = { pix_min.x + block_id_2d.x, pix_min.y + block_id_2d.y };
 	uint32_t pix_id = W * pix.y + pix.x;
 	float2 pixf = { (float)pix.x, (float)pix.y };
 
@@ -423,7 +429,8 @@ void FORWARD::render(
 	float* final_T,
 	uint32_t* n_contrib,
 	uint32_t* n_contrib2loss,
-	bool* compute_locally,
+	// bool* compute_locally,
+	uint2* d_mapping,
 	const float* bg_color,
 	float* out_color)
 {
@@ -437,7 +444,8 @@ void FORWARD::render(
 		final_T,
 		n_contrib,
 		n_contrib2loss,
-		compute_locally,
+		// compute_locally,
+		d_mapping,
 		bg_color,
 		out_color);
 }
@@ -466,7 +474,9 @@ void FORWARD::preprocess(int P, int D, int M,
 	float4* conic_opacity,
 	const dim3 grid,
 	uint32_t* tiles_touched,
-	bool prefiltered)
+	bool prefiltered,
+	int local_rank,
+	int world_size)
 {
 	preprocessCUDA<NUM_CHANNELS> << <(P + ONE_DIM_BLOCK_SIZE - 1) / ONE_DIM_BLOCK_SIZE, ONE_DIM_BLOCK_SIZE >> > (
 		P, D, M,
@@ -493,6 +503,8 @@ void FORWARD::preprocess(int P, int D, int M,
 		conic_opacity,
 		grid,
 		tiles_touched,
-		prefiltered
+		prefiltered,
+		local_rank,
+		world_size
 		);
 }

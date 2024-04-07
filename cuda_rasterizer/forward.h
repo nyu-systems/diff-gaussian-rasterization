@@ -45,7 +45,9 @@ namespace FORWARD
 		float4* conic_opacity,
 		const dim3 grid,
 		uint32_t* tiles_touched,
-		bool prefiltered);
+		bool prefiltered,
+		int local_rank,
+		int world_size);
 
 	// Main rasterization method.
 	void render(
@@ -59,7 +61,8 @@ namespace FORWARD
 		float* final_T,
 		uint32_t* n_contrib,
 		uint32_t* n_contrib2loss,
-		bool* compute_locally,
+		// bool* compute_locally,
+		uint2* d_mapping,
 		const float* bg_color,
 		float* out_color);
 }

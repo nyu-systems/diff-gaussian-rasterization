@@ -170,22 +170,11 @@ RenderGaussiansBackwardCUDA(
 torch::Tensor GetLocal2jIdsBoolCUDA(
 	int image_height,
 	int image_width,
-	int mp_rank,
-	int mp_world_size,
+	int local_rank,
+	int world_size,
 	const torch::Tensor& means2D,
 	const torch::Tensor& radii,
 	const torch::Tensor& dist_global_strategy,
 	const pybind11::dict &args);
-
-torch::Tensor GetLocal2jIdsBoolAdjustMode6CUDA(
-	int image_height,
-	int image_width,
-	int mp_rank,
-	int mp_world_size,
-	const torch::Tensor& means2D,
-	const torch::Tensor& radii,
-	const torch::Tensor& rectangles,
-	const pybind11::dict &args);
-
 
 std::tuple<int, int, int> GetBlockXY();

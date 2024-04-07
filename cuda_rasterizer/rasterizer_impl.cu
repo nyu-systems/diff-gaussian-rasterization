@@ -80,7 +80,9 @@ __global__ void duplicateWithKeys(
 	uint32_t* gaussian_values_unsorted,
 	int* radii,
 	bool* compute_locally,
-	dim3 grid)
+	dim3 grid,
+	int local_rank,
+	int world_size)
 {
 	auto idx = cg::this_grid().thread_rank();
 	if (idx >= P)
@@ -287,9 +289,9 @@ __global__ void updateTileTouched(
 	tiles_touched[idx] = cnt;
 }
 
-void save_log_in_file(int iteration, int global_rank, int world_size, std::string log_folder, const char* filename_prefix, const char* log_content) {
-	char* filename = new char[256];
-	sprintf(filename, "%s/%s_ws=%d_rk=%d.log", log_folder.c_str(), filename_prefix, world_size, global_rank);
+void save_log_in_file(int iteration, int local_rank, int world_size, std::string log_folder, const char* filename_prefix, const char* log_content) {
+	char* filename = new char[128];
+	sprintf(filename, "%s/%s_ws=%d_rk=%d.log", log_folder.c_str(), filename_prefix, world_size, local_rank);
 	std::ofstream outfile;
 	outfile.open(filename, std::ios_base::app);
 	outfile << "iteration: " << iteration << ", " << log_content << "\n";
@@ -305,7 +307,7 @@ void save_log_in_file(int iteration, int global_rank, int world_size, std::strin
 std::tuple<int, int, int, int, int, bool, bool, std::string, std::string, std::string>
  prepareArgs(const pybind11::dict &args) {
     std::string mode = args["mode"].cast<std::string>();
-    std::string global_rank_str = args["global_rank"].cast<std::string>();
+    std::string local_rank_str = args["local_rank"].cast<std::string>();
     std::string world_size_str = args["world_size"].cast<std::string>();
     std::string iteration_str = args["iteration"].cast<std::string>();
     std::string log_interval_str = args["log_interval"].cast<std::string>();
@@ -315,7 +317,7 @@ std::tuple<int, int, int, int, int, bool, bool, std::string, std::string, std::s
     // std::string dist_division_mode_str = args["dist_division_mode"].cast<std::string>();
 	std::string dist_division_mode_str = "";
 
-    int global_rank = std::stoi(global_rank_str);
+    int local_rank = std::stoi(local_rank_str);
     int world_size = std::stoi(world_size_str);
     int iteration = std::stoi(iteration_str);
     int log_interval = std::stoi(log_interval_str);
@@ -326,11 +328,41 @@ std::tuple<int, int, int, int, int, bool, bool, std::string, std::string, std::s
 	cudaError_t status = cudaGetDevice(&device);
 
 	// Pack and return the variables in a tuple
-    return std::make_tuple(global_rank, world_size, iteration, log_interval, device,
+    return std::make_tuple(local_rank, world_size, iteration, log_interval, device,
 			zhx_debug, zhx_time,
 			mode, dist_division_mode_str, log_folder_str);
 }
-
+// __global__ void flatten(const bool* compute_locally, bool* compute_locally_1d, int* count, int* mapping2d1d, int tile_y, int tile_x) {
+//     int idx = threadIdx.x + blockIdx.x * blockDim.x;
+//     int i = idx / tile_x;
+//     int j = idx % tile_x;
+//     if (i < tile_y && j < tile_x) {
+// 		if compute_locally[i * tile_x + j]
+// 		{
+// 		int idx1d=atomicAdd(count,1)
+//         compute_locally_1d[idx1d] = compute_locally[i * tile_x + j];
+// 		mapping2d1d[idx1d]=i * tile_x + j;
+// 		}
+//     }
+// }
+__global__ void get_true_values(const bool* compute_locally,int* true_val,int tile_num)
+{
+	int idx = threadIdx.x + blockIdx.x * blockDim.x;
+	if (idx<tile_num && compute_locally[idx])
+	{
+		int pos=atomicAdd(true_val, 1);
+	}
+}
+__global__ void convert_to_1D_and_store_mapping(const bool* compute_locally, int* count1d, uint2* d_mapping, int tile_x, int tile_num) {
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    if (idx < tile_num && compute_locally[idx]) {
+        int pos = atomicAdd(count1d, 1);
+        // compute_locally_1d[pos] = true;
+        d_mapping[pos]=make_uint2(idx % tile_x, idx / tile_x);
+		// .x = idx / tile_x;  // store y index
+        // d_mapping[pos].y = idx % tile_x;  // store x index
+    }
+}
 // Forward rendering procedure for differentiable rasterization
 // of Gaussians.
 int CudaRasterizer::Rasterizer::preprocessForward(
@@ -357,14 +389,14 @@ int CudaRasterizer::Rasterizer::preprocessForward(
 	bool debug,//raster_settings
 	const pybind11::dict &args)
 {
-	auto [global_rank, world_size, iteration, log_interval, device, zhx_debug, zhx_time, mode, dist_division_mode, log_folder] = prepareArgs(args);
+	auto [local_rank, world_size, iteration, log_interval, device, zhx_debug, zhx_time, mode, dist_division_mode, log_folder] = prepareArgs(args);
 	char* log_tmp = new char[500];
 
 	// print out the environment variables
 	if (mode == "train" && zhx_debug && iteration % log_interval == 1) {
-		sprintf(log_tmp, "world_size: %d, global_rank: %d, iteration: %d, log_folder: %s, zhx_debug: %d, zhx_time: %d, device: %d, log_interval: %d, dist_division_mode: %s", 
-				world_size, global_rank, iteration, log_folder.c_str(), zhx_debug, zhx_time, device, log_interval, dist_division_mode.c_str());
-		save_log_in_file(iteration, global_rank, world_size, log_folder, "cuda", log_tmp);
+		sprintf(log_tmp, "world_size: %d, local_rank: %d, iteration: %d, log_folder: %s, zhx_debug: %d, zhx_time: %d, device: %d, log_interval: %d, dist_division_mode: %s", 
+				world_size, local_rank, iteration, log_folder.c_str(), zhx_debug, zhx_time, device, log_interval, dist_division_mode.c_str());
+		save_log_in_file(iteration, local_rank, world_size, log_folder, "cuda", log_tmp);
 	}
 
 	MyTimerOnGPU timer;
@@ -408,7 +440,9 @@ int CudaRasterizer::Rasterizer::preprocessForward(
 		conic_opacity,
 		tile_grid,
 		tiles_touched_temp_buffer,
-		prefiltered
+		prefiltered,
+		local_rank,
+		world_size
 	), debug)
 	timer.stop("10 preprocess");
 
@@ -416,7 +450,7 @@ int CudaRasterizer::Rasterizer::preprocessForward(
 
 	// Print out timing information
 	if (zhx_time && iteration % log_interval == 1) {
-		timer.printAllTimes(iteration, world_size, global_rank, log_folder, true);
+		timer.printAllTimes(iteration, world_size, local_rank, log_folder, true);
 	}
 	delete log_tmp;
 	// free temporary buffer for tiles_touched. TODO: remove it. 
@@ -450,7 +484,7 @@ void CudaRasterizer::Rasterizer::preprocessBackward(
 	bool debug,
 	const pybind11::dict &args)
 {
-	auto [global_rank, world_size, iteration, log_interval, device, zhx_debug, zhx_time, mode, dist_division_mode, log_folder] = prepareArgs(args);
+	auto [local_rank, world_size, iteration, log_interval, device, zhx_debug, zhx_time, mode, dist_division_mode, log_folder] = prepareArgs(args);
 
 	MyTimerOnGPU timer;
 	const float focal_y = height / (2.0f * tan_fovy);
@@ -484,7 +518,7 @@ void CudaRasterizer::Rasterizer::preprocessBackward(
 
 	// Print out timing information
 	if (zhx_time && iteration % log_interval == 1) {
-		timer.printAllTimes(iteration, world_size, global_rank, log_folder, false);
+		timer.printAllTimes(iteration, world_size, local_rank, log_folder, false);
 	}
 }
 
@@ -533,7 +567,7 @@ int CudaRasterizer::Rasterizer::renderForward(
 	bool debug,
 	const pybind11::dict &args)
 {
-	auto [global_rank, world_size, iteration, log_interval, device, zhx_debug, zhx_time, mode, dist_division_mode, log_folder] = prepareArgs(args);	
+	auto [local_rank, world_size, iteration, log_interval, device, zhx_debug, zhx_time, mode, dist_division_mode, log_folder] = prepareArgs(args);	
 	char* log_tmp = new char[500];
 
 	MyTimerOnGPU timer;
@@ -543,6 +577,7 @@ int CudaRasterizer::Rasterizer::renderForward(
 	GeometryState geomState = GeometryState::fromChunk(chunkptr, P, true); // do not allocate extra memory here if sep_rendering==True.
 
 	dim3 tile_grid((width + BLOCK_X - 1) / BLOCK_X, (height + BLOCK_Y - 1) / BLOCK_Y, 1);
+	//make a local tile grid based on compute locally
 	dim3 block(BLOCK_X, BLOCK_Y, 1);
 	int tile_num = tile_grid.x * tile_grid.y;
 
@@ -589,7 +624,9 @@ int CudaRasterizer::Rasterizer::renderForward(
 		binningState.point_list_unsorted,
 		radii,
 		compute_locally,
-		tile_grid)
+		tile_grid,
+		local_rank,
+		world_size)
 	CHECK_CUDA(, debug)
 	timer.stop("40 duplicateWithKeys");
 
@@ -616,12 +653,39 @@ int CudaRasterizer::Rasterizer::renderForward(
 			imgState.ranges);
 	CHECK_CUDA(, debug)
 	timer.stop("60 identifyTileRanges");
+	timer.start("61 map2DcomputelocallyTo1D");
+	int* count1d;
+	CHECK_CUDA(cudaMalloc(&count1d, sizeof(int)),debug);
+	CHECK_CUDA(cudaMemset(count1d, 0, sizeof(int)),debug);
+
+	int* true_val;
+	CHECK_CUDA(cudaMalloc(&true_val, sizeof(int)),debug);
+	CHECK_CUDA(cudaMemset(true_val, 0, sizeof(int)),debug);
+
+
+
+	int threadsPerBlock = 256;
+    int blocksPerGrid = (tile_num + ONE_DIM_BLOCK_SIZE - 1) / ONE_DIM_BLOCK_SIZE;
+	get_true_values<<<blocksPerGrid,ONE_DIM_BLOCK_SIZE>>>(compute_locally,true_val,tile_num);
+	int host_count;
+    CHECK_CUDA(cudaMemcpy(&host_count, true_val, sizeof(int), cudaMemcpyDeviceToHost), debug);
+	uint2* d_mapping;
+	CHECK_CUDA(cudaMalloc(&d_mapping, host_count * sizeof(uint2)),debug);
+	convert_to_1D_and_store_mapping<<<blocksPerGrid,ONE_DIM_BLOCK_SIZE>>>(compute_locally,count1d,d_mapping,tile_grid.x,tile_num);
+	// const bool* compute_locally, int* count1d, int2* d_mapping, int tile_x, int tile_num
+
+	dim3 tile_grid_1d(host_count, 1, 1);
+
+    timer.stop("61 map2DcomputelocallyTo1D");
+
+
+
 
 	// Let each tile blend its range of Gaussians independently in parallel
 	const float* feature_ptr = rgb;
 	timer.start("70 render");
 	CHECK_CUDA(FORWARD::render(//TODO: only deal with local tiles. do not even load other tiles.
-		tile_grid, block,
+		tile_grid_1d, block,
 		imgState.ranges,
 		binningState.point_list,
 		width, height,
@@ -631,7 +695,7 @@ int CudaRasterizer::Rasterizer::renderForward(
 		imgState.accum_alpha,
 		imgState.n_contrib,
 		imgState.n_contrib2loss,
-		compute_locally,
+		d_mapping,
 		background,
 		out_color), debug)
 	timer.stop("70 render");
@@ -669,7 +733,7 @@ int CudaRasterizer::Rasterizer::renderForward(
 	//////////////////////////// Logging && Save Statictis ////////////////////////////////////////////
 	// DEBUG: print out timing information
 	if (mode == "train" && zhx_time && iteration % log_interval == 1) {
-		timer.printAllTimes(iteration, world_size, global_rank, log_folder, false);
+		timer.printAllTimes(iteration, world_size, local_rank, log_folder, false);
 	}
 
 	// DEBUG: print out the number of Gaussians contributing to each pixel.
@@ -725,7 +789,7 @@ int CudaRasterizer::Rasterizer::renderForward(
 				ave_n_contrib2loss,
 				contrib2loss_ratio);
 
-			save_log_in_file(iteration, global_rank, world_size, log_folder, "n_contrib", log_tmp);
+			save_log_in_file(iteration, local_rank, world_size, log_folder, "n_contrib", log_tmp);
 			global_sum_n_rendered += n_rendered;
 			global_sum_n_considered += sum_n_considered;
 			global_sum_n_contrib2loss += sum_n_contrib2loss;
@@ -736,8 +800,8 @@ int CudaRasterizer::Rasterizer::renderForward(
 		float global_ave_n_considered_per_pix = global_sum_n_considered / (float)total_pixels;
 		float global_ave_n_contrib2loss_per_pix = global_sum_n_contrib2loss / (float)total_pixels;
 
-		sprintf(log_tmp, "global_rank: %d, world_size: %d, num_tiles: %d, num_pixels: %d, num_rendered: %d, global_ave_n_rendered_per_pix: %f, global_ave_n_considered_per_pix: %f, global_ave_n_contrib2loss_per_pix: %f", 
-			(int)global_rank,
+		sprintf(log_tmp, "local_rank: %d, world_size: %d, num_tiles: %d, num_pixels: %d, num_rendered: %d, global_ave_n_rendered_per_pix: %f, global_ave_n_considered_per_pix: %f, global_ave_n_contrib2loss_per_pix: %f", 
+			(int)local_rank,
 			(int)world_size,
 			(int)num_local_tiles,
 			(int)total_pixels,
@@ -746,7 +810,7 @@ int CudaRasterizer::Rasterizer::renderForward(
 			global_ave_n_considered_per_pix, 
 			global_ave_n_contrib2loss_per_pix
 		);
-		save_log_in_file(iteration, global_rank, world_size, log_folder, "n_contrib", log_tmp);
+		save_log_in_file(iteration, local_rank, world_size, log_folder, "n_contrib", log_tmp);
 
 		delete[] cpu_ranges;
 		delete[] cpu_n_considered;
@@ -754,6 +818,9 @@ int CudaRasterizer::Rasterizer::renderForward(
 	}
 
 	delete[] log_tmp;
+	CHECK_CUDA(cudaFree(true_val), debug);
+	CHECK_CUDA(cudaFree(count1d), debug);
+	CHECK_CUDA(cudaFree(d_mapping), debug);
 	return num_rendered;
 }
 
@@ -778,7 +845,7 @@ void CudaRasterizer::Rasterizer::renderBackward(
 	bool debug,
 	const pybind11::dict &args)
 {
-	auto [global_rank, world_size, iteration, log_interval, device, zhx_debug, zhx_time, mode, dist_division_mode, log_folder] = prepareArgs(args);
+	auto [local_rank, world_size, iteration, log_interval, device, zhx_debug, zhx_time, mode, dist_division_mode, log_folder] = prepareArgs(args);
 
 	MyTimerOnGPU timer;
 
@@ -819,6 +886,6 @@ void CudaRasterizer::Rasterizer::renderBackward(
 	
 	// Print out timing information
 	if (zhx_time && iteration % log_interval == 1) {
-		timer.printAllTimes(iteration, world_size, global_rank, log_folder, false);
+		timer.printAllTimes(iteration, world_size, local_rank, log_folder, false);
 	}
 }
