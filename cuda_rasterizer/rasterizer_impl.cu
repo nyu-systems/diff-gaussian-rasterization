@@ -332,19 +332,6 @@ std::tuple<int, int, int, int, int, bool, bool, std::string, std::string, std::s
 			zhx_debug, zhx_time,
 			mode, dist_division_mode_str, log_folder_str);
 }
-// __global__ void flatten(const bool* compute_locally, bool* compute_locally_1d, int* count, int* mapping2d1d, int tile_y, int tile_x) {
-//     int idx = threadIdx.x + blockIdx.x * blockDim.x;
-//     int i = idx / tile_x;
-//     int j = idx % tile_x;
-//     if (i < tile_y && j < tile_x) {
-// 		if compute_locally[i * tile_x + j]
-// 		{
-// 		int idx1d=atomicAdd(count,1)
-//         compute_locally_1d[idx1d] = compute_locally[i * tile_x + j];
-// 		mapping2d1d[idx1d]=i * tile_x + j;
-// 		}
-//     }
-// }
 __global__ void get_true_values(const bool* compute_locally,int* true_val,int tile_num)
 {
 	int idx = threadIdx.x + blockIdx.x * blockDim.x;
@@ -358,11 +345,12 @@ __global__ void convert_to_1D_and_store_mapping(const bool* compute_locally, int
     if (idx < tile_num && compute_locally[idx]) {
         int pos = atomicAdd(count1d, 1);
         // compute_locally_1d[pos] = true;
-        d_mapping[pos]=make_uint2(idx % tile_x, idx / tile_x);
-		// .x = idx / tile_x;  // store y index
-        // d_mapping[pos].y = idx % tile_x;  // store x index
+        d_mapping[pos]=idx;
+		//.x = int(idx / tile_x);  // store y index
+        // d_mapping[pos].y = int(idx % tile_x);  // store x index
     }
 }
+
 // Forward rendering procedure for differentiable rasterization
 // of Gaussians.
 int CudaRasterizer::Rasterizer::preprocessForward(
@@ -678,9 +666,6 @@ int CudaRasterizer::Rasterizer::renderForward(
 
     timer.stop("61 map2DcomputelocallyTo1D");
 
-
-
-
 	// Let each tile blend its range of Gaussians independently in parallel
 	const float* feature_ptr = rgb;
 	timer.start("70 render");
@@ -820,7 +805,6 @@ int CudaRasterizer::Rasterizer::renderForward(
 	delete[] log_tmp;
 	CHECK_CUDA(cudaFree(true_val), debug);
 	CHECK_CUDA(cudaFree(count1d), debug);
-	CHECK_CUDA(cudaFree(d_mapping), debug);
 	return num_rendered;
 }
 
