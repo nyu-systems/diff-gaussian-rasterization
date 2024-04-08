@@ -516,15 +516,42 @@ __global__ void map2DcomputelocallyTo1D(
     const bool* compute_locally,
     int* compute_locally_1D_2D_map,
     dim3 grid,
-    int* count
+    int* block_count
 ) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < tile_num) {
         if (compute_locally[i]) {
-            int j = atomicAdd(count, 1);
+            int j = atomicAdd(block_count, 1);
             compute_locally_1D_2D_map[j] = i;
         }
     }
+}
+
+dim3 map2DcomputelocallyTo1DGrid(
+    const int tile_num,
+    const bool* compute_locally,
+    int* compute_locally_1D_2D_map,
+    const dim3 tile_grid,
+    bool debug
+) {
+    int block_count = 0;
+    int* block_count_dev;
+    CHECK_CUDA(cudaMalloc(&block_count_dev, sizeof(int)), debug);
+    CHECK_CUDA(cudaMemcpy(block_count_dev, &block_count, sizeof(int), cudaMemcpyHostToDevice), debug);
+
+    // Perform the mapping on the device side
+    map2DcomputelocallyTo1D<<<cdiv(tile_num, ONE_DIM_BLOCK_SIZE), ONE_DIM_BLOCK_SIZE>>>(
+        tile_num,
+        compute_locally,
+        compute_locally_1D_2D_map,
+        tile_grid,
+        block_count_dev
+    );
+
+    CHECK_CUDA(cudaMemcpy(&block_count, block_count_dev, sizeof(int), cudaMemcpyDeviceToHost), debug);
+    CHECK_CUDA(cudaFree(block_count_dev), debug);
+
+    return dim3(block_count, 1, 1);
 }
 
 int CudaRasterizer::Rasterizer::renderForward(
@@ -632,24 +659,10 @@ int CudaRasterizer::Rasterizer::renderForward(
 	timer.stop("60 identifyTileRanges");
 
 	timer.start("61 map2DcomputelocallyTo1D");
-    int count = 0;
     int* compute_locally_1D_2D_map;
-    int* dev_count;
     CHECK_CUDA(cudaMalloc(&compute_locally_1D_2D_map, tile_num * sizeof(int)), debug);
-    CHECK_CUDA(cudaMalloc(&dev_count, sizeof(int)), debug);
-    CHECK_CUDA(cudaMemcpy(dev_count, &count, sizeof(int), cudaMemcpyHostToDevice), debug);
 
-    // Perform the mapping on the device side
-    map2DcomputelocallyTo1D<<<cdiv(tile_num, ONE_DIM_BLOCK_SIZE), ONE_DIM_BLOCK_SIZE>>>(
-        tile_num,
-        compute_locally,
-        compute_locally_1D_2D_map,
-        tile_grid,
-        dev_count
-    );
-
-    CHECK_CUDA(cudaMemcpy(&count, dev_count, sizeof(int), cudaMemcpyDeviceToHost), debug);
-    dim3 tile_grid_1d(count, 1, 1);
+    dim3 tile_grid_1d = map2DcomputelocallyTo1DGrid(tile_num, compute_locally, compute_locally_1D_2D_map, tile_grid, debug);
 
     timer.stop("61 map2DcomputelocallyTo1D");
 
@@ -791,7 +804,6 @@ int CudaRasterizer::Rasterizer::renderForward(
 
 	delete[] log_tmp;
     CHECK_CUDA(cudaFree(compute_locally_1D_2D_map), debug);
-    CHECK_CUDA(cudaFree(dev_count), debug);
 	return num_rendered;
 }
 
@@ -828,24 +840,10 @@ void CudaRasterizer::Rasterizer::renderBackward(
     const int tile_num = tile_grid.x * tile_grid.y;
 
     timer.start("61 map2DcomputelocallyTo1D");
-    int count = 0;
     int* compute_locally_1D_2D_map;
-    int* dev_count;
     CHECK_CUDA(cudaMalloc(&compute_locally_1D_2D_map, tile_num * sizeof(int)), debug);
-    CHECK_CUDA(cudaMalloc(&dev_count, sizeof(int)), debug);
-    CHECK_CUDA(cudaMemcpy(dev_count, &count, sizeof(int), cudaMemcpyHostToDevice), debug);
 
-    // Perform the mapping on the device side
-    map2DcomputelocallyTo1D<<<cdiv(tile_num, ONE_DIM_BLOCK_SIZE), ONE_DIM_BLOCK_SIZE>>>(
-        tile_num,
-        compute_locally,
-        compute_locally_1D_2D_map,
-        tile_grid,
-        dev_count
-    );
-
-    CHECK_CUDA(cudaMemcpy(&count, dev_count, sizeof(int), cudaMemcpyDeviceToHost), debug);
-    dim3 tile_grid_1d(count, 1, 1);
+    dim3 tile_grid_1d = map2DcomputelocallyTo1DGrid(tile_num, compute_locally, compute_locally_1D_2D_map, tile_grid, debug);
 
     timer.stop("61 map2DcomputelocallyTo1D");
 
@@ -885,5 +883,4 @@ void CudaRasterizer::Rasterizer::renderBackward(
 
     // Free used memory
     CHECK_CUDA(cudaFree(compute_locally_1D_2D_map), debug);
-    CHECK_CUDA(cudaFree(dev_count), debug);
 }
