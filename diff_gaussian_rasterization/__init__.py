@@ -159,6 +159,7 @@ def render_gaussians(
     depths,
     radii,
     compute_locally,
+    extended_compute_locally,
     raster_settings,
     cuda_args,
 ):
@@ -169,45 +170,10 @@ def render_gaussians(
         depths,
         radii,
         compute_locally,
+        extended_compute_locally,
         raster_settings,
         cuda_args,
     )
-
-def get_extended_compute_locally(cuda_args, image_height, image_width):
-    if isinstance(cuda_args["dist_global_strategy"], str):
-        mp_rank = int(cuda_args["mp_rank"])
-        dist_global_strategy = [int(x) for x in cuda_args["dist_global_strategy"].split(",")]
-
-        num_tile_y = (image_height + 16 - 1) // 16 #TODO: this is dangerous because 16 may change.
-        num_tile_x = (image_width + 16 - 1) // 16
-        tile_l = max(dist_global_strategy[mp_rank]-num_tile_x-1, 0)
-        tile_r = min(dist_global_strategy[mp_rank+1]+num_tile_x+1, num_tile_y*num_tile_x)
-
-        extended_compute_locally = torch.zeros(num_tile_y*num_tile_x, dtype=torch.bool, device="cuda")
-        extended_compute_locally[tile_l:tile_r] = True
-        extended_compute_locally = extended_compute_locally.view(num_tile_y, num_tile_x)
-
-        return extended_compute_locally
-    else:
-        division_pos = cuda_args["dist_global_strategy"]
-        division_pos_xs, division_pos_ys = division_pos
-        mp_rank = int(cuda_args["mp_rank"])
-        grid_size_x = len(division_pos_xs) - 1
-        grid_size_y = len(division_pos_ys[0]) - 1
-        y_rank = mp_rank // grid_size_x
-        x_rank = mp_rank % grid_size_x
-
-        local_tile_x_l, local_tile_x_r = division_pos_xs[x_rank], division_pos_xs[x_rank+1]
-        local_tile_y_l, local_tile_y_r = division_pos_ys[x_rank][y_rank], division_pos_ys[x_rank][y_rank+1]
-
-        num_tile_y = (image_height + 16 - 1) // 16
-        num_tile_x = (image_width + 16 - 1) // 16
-
-        extended_compute_locally = torch.zeros((num_tile_y, num_tile_x), dtype=torch.bool, device="cuda")
-        extended_compute_locally[max(local_tile_y_l-1,0):min(local_tile_y_r+1,num_tile_y),
-                                 max(local_tile_x_l-1,0):min(local_tile_x_r+1,num_tile_x)] = True
-
-        return extended_compute_locally
 
 class _RenderGaussians(torch.autograd.Function):
     @staticmethod
@@ -219,6 +185,7 @@ class _RenderGaussians(torch.autograd.Function):
         depths,
         radii,
         compute_locally,
+        extended_compute_locally,
         raster_settings,
         cuda_args,
     ):
@@ -230,10 +197,6 @@ class _RenderGaussians(torch.autograd.Function):
         # Here, because the means2D in cuda code is (P, 2), we need to remove the padding.
         # Basically, means2D is (P, 3) in python. But it is (P, 2) in cuda code.
         # dL_dmeans2D is alwayds (P, 3) in both python and cuda code.
-
-        extended_compute_locally = get_extended_compute_locally(cuda_args,
-                                                                raster_settings.image_height,
-                                                                raster_settings.image_width)
 
         # Restructure arguments the way that the C++ lib expects them
         args = (
@@ -312,6 +275,7 @@ class _RenderGaussians(torch.autograd.Function):
             None,
             None,
             None,
+            None,
             None # this is for cuda_args
         )
 
@@ -370,7 +334,7 @@ class GaussianRasterizer(nn.Module):
             raster_settings,
             cuda_args)
 
-    def render_gaussians(self, means2D, conic_opacity, rgb, depths, radii, compute_locally, cuda_args = None):
+    def render_gaussians(self, means2D, conic_opacity, rgb, depths, radii, compute_locally, extended_compute_locally, cuda_args = None):
 
         raster_settings = self.raster_settings
 
@@ -382,11 +346,13 @@ class GaussianRasterizer(nn.Module):
             depths,
             radii,
             compute_locally,
+            extended_compute_locally,
             raster_settings,
             cuda_args
         )
 
     def get_local2j_ids(self, means2D, radii, cuda_args):
+        # For each 3dgs, calculate the set of GPUs that will use this 3dgs for rendering.
 
         if isinstance(cuda_args["dist_global_strategy"], str):
             raster_settings = self.raster_settings
@@ -447,21 +413,6 @@ class GaussianRasterizer(nn.Module):
 
         return local2j_ids, local2j_ids_bool
 
-
-    def get_distribution_strategy(self, means2D, radii, cuda_args):
-
-        assert False, "This function is not used in the current version."
-
-        raster_settings = self.raster_settings
-
-        return _C.get_distribution_strategy(
-            raster_settings.image_height,
-            raster_settings.image_width,
-            means2D,
-            radii,
-            raster_settings.debug,
-            cuda_args
-        )# the return is compute_locally
 
 class _LoadImageTilesByPos(torch.autograd.Function):
 
