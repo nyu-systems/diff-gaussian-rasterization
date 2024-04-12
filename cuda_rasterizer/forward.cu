@@ -272,7 +272,7 @@ renderCUDA(
 	float* __restrict__ final_T,
 	uint32_t* __restrict__ n_contrib,
 	uint32_t* __restrict__ n_contrib2loss,
-	bool* __restrict__ compute_locally,
+    const int* __restrict__ compute_locally_1D_2D_map,
 	const float* __restrict__ bg_color,
 	float* __restrict__ out_color)
 {
@@ -284,10 +284,10 @@ renderCUDA(
 	// auto block_id = block.group_index().y * horizontal_blocks + block.group_index().x;
 
 	// method 2: this seems to be faster than others, in set of experiments: fix_com_loc_flc_1/2/3
-	uint32_t horizontal_blocks = (W + BLOCK_X - 1) / BLOCK_X;
-	auto block_id = block.group_index().y * horizontal_blocks + block.group_index().x;
-	if (!compute_locally[block_id])
-		return;
+	const int block_id_1d = block.group_index().x;
+    const int block_id = compute_locally_1D_2D_map[block_id_1d];
+
+    //method2.1
 
 	// method 3
 	// __shared__ bool compute_locally_this_tile;
@@ -304,12 +304,15 @@ renderCUDA(
 	// if (!compute_locally_this_tile)
 	// 	return;
 
+    const uint2 tile_grid = { cdiv(W, BLOCK_X), cdiv(H, BLOCK_Y) }; 
+    const int block_id_x = block_id % tile_grid.x;
+    const int block_id_y = block_id / tile_grid.x;
 
-	uint2 pix_min = { block.group_index().x * BLOCK_X, block.group_index().y * BLOCK_Y };
-	uint2 pix_max = { min(pix_min.x + BLOCK_X, W), min(pix_min.y + BLOCK_Y , H) };
-	uint2 pix = { pix_min.x + block.thread_index().x, pix_min.y + block.thread_index().y };
-	uint32_t pix_id = W * pix.y + pix.x;
-	float2 pixf = { (float)pix.x, (float)pix.y };
+    const uint2 pix_min = { block_id_x * BLOCK_X, block_id_y * BLOCK_Y };
+	const uint2 pix_max = { min(pix_min.x + BLOCK_X, W), min(pix_min.y + BLOCK_Y , H) };
+	const uint2 pix = { pix_min.x + block.thread_index().x, pix_min.y + block.thread_index().y };
+	const uint32_t pix_id = W * pix.y + pix.x;
+	const float2 pixf = { (float)pix.x, (float)pix.y };
 
 	// Check if this thread is associated with a valid pixel or outside.
 	bool inside = pix.x < W&& pix.y < H;
@@ -323,7 +326,7 @@ renderCUDA(
 	// method 3
 	// uint2 range = range_this_tile;
 
-	const int rounds = ((range.y - range.x + BLOCK_SIZE - 1) / BLOCK_SIZE);
+	const int rounds = cdiv(range.y - range.x, BLOCK_SIZE);
 	int toDo = range.y - range.x;
 
 	// Allocate storage for batches of collectively fetched data.
@@ -423,7 +426,7 @@ void FORWARD::render(
 	float* final_T,
 	uint32_t* n_contrib,
 	uint32_t* n_contrib2loss,
-	bool* compute_locally,
+    const int* compute_locally_1D_2D_map,
 	const float* bg_color,
 	float* out_color)
 {
@@ -437,7 +440,7 @@ void FORWARD::render(
 		final_T,
 		n_contrib,
 		n_contrib2loss,
-		compute_locally,
+        compute_locally_1D_2D_map,
 		bg_color,
 		out_color);
 }

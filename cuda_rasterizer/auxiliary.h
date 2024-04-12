@@ -18,6 +18,7 @@
 
 #define BLOCK_SIZE (BLOCK_X * BLOCK_Y)
 #define NUM_WARPS (BLOCK_SIZE/32)
+#define cdiv(a, b) ((a + b - 1) / b)
 
 // Spherical harmonics coefficients
 __device__ const float SH_C0 = 0.28209479177387814f;

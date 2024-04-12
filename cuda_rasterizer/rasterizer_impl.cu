@@ -511,7 +511,48 @@ void CudaRasterizer::Rasterizer::getDistributionStrategy(
 /////////////////////////////// Render ///////////////////////////////
 
 
+__global__ void map2DcomputelocallyTo1D(
+    int tile_num,
+    const bool* compute_locally,
+    int* compute_locally_1D_2D_map,
+    dim3 grid,
+    int* block_count
+) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < tile_num) {
+        if (compute_locally[i]) {
+            int j = atomicAdd(block_count, 1);
+            compute_locally_1D_2D_map[j] = i;
+        }
+    }
+}
 
+dim3 map2DcomputelocallyTo1DGrid(
+    const int tile_num,
+    const bool* compute_locally,
+    int* compute_locally_1D_2D_map,
+    const dim3 tile_grid,
+    bool debug
+) {
+    int block_count = 0;
+    int* block_count_dev;
+    CHECK_CUDA(cudaMalloc(&block_count_dev, sizeof(int)), debug);
+    CHECK_CUDA(cudaMemcpy(block_count_dev, &block_count, sizeof(int), cudaMemcpyHostToDevice), debug);
+
+    // Perform the mapping on the device side
+    map2DcomputelocallyTo1D<<<cdiv(tile_num, ONE_DIM_BLOCK_SIZE), ONE_DIM_BLOCK_SIZE>>>(
+        tile_num,
+        compute_locally,
+        compute_locally_1D_2D_map,
+        tile_grid,
+        block_count_dev
+    );
+
+    CHECK_CUDA(cudaMemcpy(&block_count, block_count_dev, sizeof(int), cudaMemcpyDeviceToHost), debug);
+    CHECK_CUDA(cudaFree(block_count_dev), debug);
+
+    return dim3(block_count, 1, 1);
+}
 
 int CudaRasterizer::Rasterizer::renderForward(
 	std::function<char* (size_t)> geometryBuffer,
@@ -542,7 +583,7 @@ int CudaRasterizer::Rasterizer::renderForward(
 	char* chunkptr = geometryBuffer(chunk_size);
 	GeometryState geomState = GeometryState::fromChunk(chunkptr, P, true); // do not allocate extra memory here if sep_rendering==True.
 
-	dim3 tile_grid((width + BLOCK_X - 1) / BLOCK_X, (height + BLOCK_Y - 1) / BLOCK_Y, 1);
+	dim3 tile_grid(cdiv(width, BLOCK_X), cdiv(height, BLOCK_Y), 1);
 	dim3 block(BLOCK_X, BLOCK_Y, 1);
 	int tile_num = tile_grid.x * tile_grid.y;
 
@@ -553,7 +594,7 @@ int CudaRasterizer::Rasterizer::renderForward(
 
 	timer.start("24 updateDistributedStatLocally.updateTileTouched");
 	// For sep_rendering==True case (here), we only compute tiles_touched in the renderForward.
-	updateTileTouched <<<(P + ONE_DIM_BLOCK_SIZE - 1) / ONE_DIM_BLOCK_SIZE, ONE_DIM_BLOCK_SIZE >>> (
+	updateTileTouched <<<cdiv(P, ONE_DIM_BLOCK_SIZE), ONE_DIM_BLOCK_SIZE >>> (
 		P,
 		tile_grid,
 		radii,
@@ -580,7 +621,7 @@ int CudaRasterizer::Rasterizer::renderForward(
 	timer.start("40 duplicateWithKeys");
 	// For each instance to be rendered, produce adequate [ tile | depth ] key 
 	// and corresponding dublicated Gaussian indices to be sorted
-	duplicateWithKeys << <(P + ONE_DIM_BLOCK_SIZE - 1) / ONE_DIM_BLOCK_SIZE, ONE_DIM_BLOCK_SIZE >> > (
+	duplicateWithKeys << <cdiv(P, ONE_DIM_BLOCK_SIZE), ONE_DIM_BLOCK_SIZE >> > (
 		P,
 		means2D,
 		depths,
@@ -610,18 +651,26 @@ int CudaRasterizer::Rasterizer::renderForward(
 	timer.start("60 identifyTileRanges");
 	// Identify start and end of per-tile workloads in sorted list
 	if (num_rendered > 0)
-		identifyTileRanges << <(num_rendered + ONE_DIM_BLOCK_SIZE - 1) / ONE_DIM_BLOCK_SIZE, ONE_DIM_BLOCK_SIZE >> > (
+		identifyTileRanges << <cdiv(num_rendered, ONE_DIM_BLOCK_SIZE), ONE_DIM_BLOCK_SIZE >> > (
 			num_rendered,
 			binningState.point_list_keys,
 			imgState.ranges);
 	CHECK_CUDA(, debug)
 	timer.stop("60 identifyTileRanges");
 
-	// Let each tile blend its range of Gaussians independently in parallel
+	timer.start("61 map2DcomputelocallyTo1D");
+    int* compute_locally_1D_2D_map;
+    CHECK_CUDA(cudaMalloc(&compute_locally_1D_2D_map, tile_num * sizeof(int)), debug);
+
+    dim3 tile_grid_1d = map2DcomputelocallyTo1DGrid(tile_num, compute_locally, compute_locally_1D_2D_map, tile_grid, debug);
+
+    timer.stop("61 map2DcomputelocallyTo1D");
+
+    // Let each tile blend its range of Gaussians independently in parallel
 	const float* feature_ptr = rgb;
 	timer.start("70 render");
 	CHECK_CUDA(FORWARD::render(//TODO: only deal with local tiles. do not even load other tiles.
-		tile_grid, block,
+		tile_grid_1d, block,
 		imgState.ranges,
 		binningState.point_list,
 		width, height,
@@ -631,7 +680,7 @@ int CudaRasterizer::Rasterizer::renderForward(
 		imgState.accum_alpha,
 		imgState.n_contrib,
 		imgState.n_contrib2loss,
-		compute_locally,
+        compute_locally_1D_2D_map,
 		background,
 		out_color), debug)
 	timer.stop("70 render");
@@ -754,6 +803,7 @@ int CudaRasterizer::Rasterizer::renderForward(
 	}
 
 	delete[] log_tmp;
+    CHECK_CUDA(cudaFree(compute_locally_1D_2D_map), debug);
 	return num_rendered;
 }
 
@@ -787,6 +837,15 @@ void CudaRasterizer::Rasterizer::renderBackward(
 
 	const dim3 tile_grid((width + BLOCK_X - 1) / BLOCK_X, (height + BLOCK_Y - 1) / BLOCK_Y, 1);
 	const dim3 block(BLOCK_X, BLOCK_Y, 1);
+    const int tile_num = tile_grid.x * tile_grid.y;
+
+    timer.start("61 map2DcomputelocallyTo1D");
+    int* compute_locally_1D_2D_map;
+    CHECK_CUDA(cudaMalloc(&compute_locally_1D_2D_map, tile_num * sizeof(int)), debug);
+
+    dim3 tile_grid_1d = map2DcomputelocallyTo1DGrid(tile_num, compute_locally, compute_locally_1D_2D_map, tile_grid, debug);
+
+    timer.stop("61 map2DcomputelocallyTo1D");
 
 	// Compute loss gradients w.r.t. 2D mean position, conic matrix,
 	// opacity and RGB of Gaussians from per-pixel loss gradients.
@@ -794,7 +853,7 @@ void CudaRasterizer::Rasterizer::renderBackward(
 	const float* color_ptr = rgb;
 	timer.start("b10 render");
 	CHECK_CUDA(BACKWARD::render(
-		tile_grid,
+		tile_grid_1d,
 		block,
 		imgState.ranges,
 		binningState.point_list,
@@ -805,7 +864,7 @@ void CudaRasterizer::Rasterizer::renderBackward(
 		color_ptr,
 		imgState.accum_alpha,
 		imgState.n_contrib,
-		compute_locally,
+		compute_locally_1D_2D_map,
 		dL_dpix,
 		(float3*)dL_dmean2D,
 		(float4*)dL_dconic,
@@ -821,4 +880,7 @@ void CudaRasterizer::Rasterizer::renderBackward(
 	if (zhx_time && iteration % log_interval == 1) {
 		timer.printAllTimes(iteration, world_size, global_rank, log_folder, false);
 	}
+
+    // Free used memory
+    CHECK_CUDA(cudaFree(compute_locally_1D_2D_map), debug);
 }

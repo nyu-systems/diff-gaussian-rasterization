@@ -408,7 +408,7 @@ renderCUDA(
 	const float* __restrict__ colors,
 	const float* __restrict__ final_Ts,
 	const uint32_t* __restrict__ n_contrib,
-	const bool* __restrict__ compute_locally,
+	const int* __restrict__ compute_locally_1D_2D_map,
 	const float* __restrict__ dL_dpixels,
 	float3* __restrict__ dL_dmean2D,
 	float4* __restrict__ dL_dconic2D,
@@ -423,10 +423,8 @@ renderCUDA(
 	// auto block_id = block.group_index().y * horizontal_blocks + block.group_index().x;
 
 	// method 2: this seems to be faster than others, in set of experiments: fix_com_loc_flc_1/2/3
-	const uint32_t horizontal_blocks = (W + BLOCK_X - 1) / BLOCK_X;
-	auto block_id = block.group_index().y * horizontal_blocks + block.group_index().x;
-	if (!compute_locally[block_id])
-		return;
+	const int block_id_1d = block.group_index().x;
+    const int block_id = compute_locally_1D_2D_map[block_id_1d];
 
 	// method 3
 	// __shared__ bool compute_locally_this_tile;
@@ -443,7 +441,11 @@ renderCUDA(
 	// if (!compute_locally_this_tile)
 	// 	return;
 
-	const uint2 pix_min = { block.group_index().x * BLOCK_X, block.group_index().y * BLOCK_Y };
+    const uint2 tile_grid = { cdiv(W, BLOCK_X), cdiv(H, BLOCK_Y) }; 
+    const int block_id_x = block_id % tile_grid.x;
+    const int block_id_y = block_id / tile_grid.x;
+
+    const uint2 pix_min = { block_id_x * BLOCK_X, block_id_y * BLOCK_Y };
 	const uint2 pix_max = { min(pix_min.x + BLOCK_X, W), min(pix_min.y + BLOCK_Y , H) };
 	const uint2 pix = { pix_min.x + block.thread_index().x, pix_min.y + block.thread_index().y };
 	const uint32_t pix_id = W * pix.y + pix.x;
@@ -665,7 +667,7 @@ void BACKWARD::render(
 	const float* colors,
 	const float* final_Ts,
 	const uint32_t* n_contrib,
-	const bool* compute_locally,
+	const int* compute_locally_1D_2D_map,
 	const float* dL_dpixels,
 	float3* dL_dmean2D,
 	float4* dL_dconic2D,
@@ -682,7 +684,7 @@ void BACKWARD::render(
 		colors,
 		final_Ts,
 		n_contrib,
-		compute_locally,
+		compute_locally_1D_2D_map,
 		dL_dpixels,
 		dL_dmean2D,
 		dL_dconic2D,
