@@ -151,6 +151,19 @@ namespace CudaRasterizer
 			const pybind11::dict &args);
 
 
+    
+    /////////////////////////////// Loss ///////////////////////////////
+
+    static float lossForward(
+      float *image,
+      float *gt_image,
+      bool *mask,
+      int channels,
+      int height,
+      int width,
+      int lambda_dssim);
+
+
 	};
 };
 

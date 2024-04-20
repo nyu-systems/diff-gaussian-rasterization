@@ -300,6 +300,40 @@ class _RenderGaussians(torch.autograd.Function):
 
 
 
+########################### Loss ###########################
+
+
+
+def fused_loss(
+  image, 
+  gt_image, 
+  mask, 
+  lambda_dssim=0.2
+):
+  return _FusedLoss.apply(image, gt_image, mask, lambda_dssim)
+
+class _FusedLoss(torch.autograd.Function):
+  @staticmethod
+  def forward(ctx, image, gt_image, mask, lambda_dssim):
+    args = (
+      image,
+      gt_image,
+      mask,
+      lambda_dssim
+    )
+    
+    loss = _C.fused_loss(*args)
+    return loss
+  
+  @staticmethod
+  def backward(ctx):
+    # TODO
+    pass
+
+
+
+
+
 ########################### Settings ###########################
 
 
@@ -364,6 +398,14 @@ class GaussianRasterizer(nn.Module):
             raster_settings,
             cuda_args
         )
+    
+    # def fused_loss(self, image, gt_image, mask, lambda_dssim):
+    #   return fused_loss(
+    #     image,
+    #     gt_image,
+    #     mask,
+    #     lambda_dssim
+    #   )
 
     def get_local2j_ids(self, means2D, radii, cuda_args):
 

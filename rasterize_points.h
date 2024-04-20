@@ -163,6 +163,16 @@ RenderGaussiansBackwardCUDA(
 
 
 
+
+/////////////////////////////// Loss ///////////////////////////////
+
+float FusedLossCUDA(
+  torch::Tensor& image,
+  torch::Tensor& gt_image,
+  torch::Tensor& mask,
+  float lambda_dssim
+);
+
 /////////////////////////////// Utility tools ///////////////////////////////
 
 

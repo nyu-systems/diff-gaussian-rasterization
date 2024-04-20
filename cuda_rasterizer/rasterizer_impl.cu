@@ -17,6 +17,7 @@
 #include <numeric>
 #include <string>
 #include <cstdlib>
+#include <cmath>
 #include <chrono>
 #include <cuda.h>
 #include "cuda_runtime.h"
@@ -299,6 +300,45 @@ void save_log_in_file(int iteration, int local_rank, int world_size, std::string
 	delete[] filename;
 }
 
+__global__ void L1LossCUDA(
+  float *image,
+  float *gt_image,
+  bool *mask,
+  int channels,
+  int height,
+  int width,
+  int lambda_dssim,
+  float *output
+)
+{
+  int c = blockIdx.x;
+  int row = blockIdx.y;
+  int idx = threadIdx.x;
+  int stride = blockDim.x;
+
+  extern __shared__ float Row[];
+
+  // L1 loss.
+  for (int i = idx; i < width; i += stride)
+  {
+    float pixel = image[c * height * width + row * width + idx];
+    pixel = std::abs(pixel - gt_image[c * height * width + row * width + idx]);
+    pixel *= mask[row * width + idx];
+    Row[i] = pixel;
+  }
+  __syncthreads();
+  
+  // Row-wise reduction.
+  float sum = 0;
+  if (idx == 0)
+  {
+    for (int i = 0; i < width; i++)
+    {
+      sum += Row[i];
+    }
+    output[c * height + row] = sum;
+  }
+}
 
 /////////////////////////////// Preprocess ///////////////////////////////
 
@@ -827,4 +867,53 @@ void CudaRasterizer::Rasterizer::renderBackward(
 	if (zhx_time && iteration % log_interval == 1) {
 		timer.printAllTimes(iteration, world_size, local_rank, log_folder, false);
 	}
+}
+
+
+
+
+//////////////////// Loss ////////////////////
+float CudaRasterizer::Rasterizer::lossForward(
+  float *image,
+  float *gt_image,
+  bool *mask,
+  int channels,
+  int height,
+  int width,
+  int lambda_dssim
+)
+{
+  // L1 loss.
+  float *l1output;
+  cudaMallocManaged(&l1output, channels * height * sizeof(float));
+
+  int blockSize = std::min(width, 1024); // Try to cover a whole row with one block.
+  dim3 dimGrid(channels, height);
+
+  L1LossCUDA<<<dimGrid, blockSize, width * sizeof(float)>>>(
+    image,
+    gt_image,
+    mask,
+    channels,
+    height,
+    width,
+    lambda_dssim,
+    l1output
+  );
+  
+  cudaDeviceSynchronize();
+
+  float Ll1 = 0;
+  for (int i = 0; i < channels * height; i++)
+  {
+    Ll1 += l1output[i];
+  }
+  cudaFree(l1output);
+
+  // SSIM loss.
+
+  // Final loss.
+  float loss = Ll1;
+
+  return loss;
 }

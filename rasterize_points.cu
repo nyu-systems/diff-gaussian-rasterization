@@ -399,6 +399,28 @@ RenderGaussiansBackwardCUDA(
   return std::make_tuple(dL_dmeans2D, dL_dconic_opacity, dL_dcolors);
 }
 
+/////////////////////////////// Loss ///////////////////////////////
+
+float FusedLossCUDA(
+  torch::Tensor& image,
+  torch::Tensor& gt_image,
+  torch::Tensor& mask,
+  float lambda_dssim
+)
+{
+  float loss = CudaRasterizer::Rasterizer::lossForward(
+    image.contiguous().data<float>(),
+    gt_image.contiguous().data<float>(),
+    mask.contiguous().data<bool>(),
+    image.size(0),
+    image.size(1),
+    image.size(2),
+    lambda_dssim
+  );
+  
+  return loss;
+}
+
 /////////////////////////////// Utility tools ///////////////////////////////
 
 __global__ void getTouchedIdsBool(
