@@ -74,6 +74,88 @@ def test_gaussian_rasterizer_time():
     preprocess_time = end_time - start_time
     print(f"Time taken by preprocess_gaussians: {preprocess_time:.4f} seconds")
 
+def test_improved_gaussian_rasterizer():
+
+    # Set up the input data
+    num_gaussians = 10000
+    num_batches = 4
+    means3D = torch.randn(num_gaussians, 3).cuda()
+    scales = torch.randn(num_gaussians, 3).cuda()
+    rotations = torch.randn(num_gaussians, 3, 3).cuda()
+    shs = torch.randn(num_gaussians, 9).cuda()
+    opacity = torch.randn(num_gaussians, 1).cuda()
+
+    # Set up the viewpoint cameras
+    batched_viewpoint_cameras = []
+    for _ in range(num_batches):
+        viewpoint_camera = type('ViewpointCamera', (), {})
+        viewpoint_camera.FoVx = math.radians(60)
+        viewpoint_camera.FoVy = math.radians(60)
+        viewpoint_camera.image_height = 512
+        viewpoint_camera.image_width = 512
+        viewpoint_camera.world_view_transform = torch.eye(4).cuda()
+        viewpoint_camera.full_proj_transform = torch.eye(4).cuda()
+        viewpoint_camera.camera_center = torch.zeros(3).cuda()
+        batched_viewpoint_cameras.append(viewpoint_camera)
+
+    # Set up the strategies
+    batched_strategies = [None] * num_batches
+
+    # Set up other parameters
+    bg_color = torch.ones(3).cuda()
+    scaling_modifier = 1.0
+    pc = type('PC', (), {})
+    pc.active_sh_degree = 2
+    pipe = type('Pipe', (), {})
+    pipe.debug = False
+    mode = "train"
+
+    batched_rasterizers = []
+    batched_cuda_args = []
+    batched_screenspace_params = []
+    batched_means2D = []
+    batched_radii = []
+    raster_settings_list=[]
+    for i, (viewpoint_camera, strategy) in enumerate(zip(batched_viewpoint_cameras, batched_strategies)):
+        ########## [START] Prepare CUDA Rasterization Settings ##########
+        cuda_args = get_cuda_args(strategy, mode)
+        batched_cuda_args.append(cuda_args)
+
+        # Set up rasterization configuration
+        tanfovx = math.tan(viewpoint_camera.FoVx * 0.5)
+        tanfovy = math.tan(viewpoint_camera.FoVy * 0.5)
+
+        raster_settings_list.append(GaussianRasterizationSettings(
+            image_height=int(viewpoint_camera.image_height),
+            image_width=int(viewpoint_camera.image_width),
+            tanfovx=tanfovx,
+            tanfovy=tanfovy,
+            bg=bg_color,
+            scale_modifier=scaling_modifier,
+            viewmatrix=viewpoint_camera.world_view_transform,
+            projmatrix=viewpoint_camera.full_proj_transform,
+            sh_degree=pc.active_sh_degree,
+            campos=viewpoint_camera.camera_center,
+            prefiltered=False,
+            debug=pipe.debug
+        ))
+
+
+    rasterizer=GaussianRasterizerBatches(raster_settings=raster_settings_list)
+    start_time = time.time()
+    batched_means2D, batched_rgb, batched_conic_opacity, batched_radii, batched_depths = rasterizer.preprocess_gaussians_batches(
+            means3D=means3D,
+            scales=scales,
+            rotations=rotations,
+            shs=shs,
+            opacities=opacity,
+            cuda_args=batched_cuda_args
+        )
+    end_time = time.time()
+
+    preprocess_time = end_time - start_time
+    print(f"Time taken by preprocess_gaussians: {preprocess_time:.4f} seconds")
+
 
 def test_batched_gaussian_rasterizer():
     # Set up the input data
@@ -162,6 +244,8 @@ def test_batched_gaussian_rasterizer():
 
     # Perform further operations with the batched results
     # ...
+
+
 
 if __name__ == "__main__":
     test_gaussian_rasterizer_time()

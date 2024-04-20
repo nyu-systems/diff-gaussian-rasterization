@@ -304,6 +304,31 @@ class GaussianRasterizationSettings(NamedTuple):
     prefiltered : bool
     debug : bool
 
+class GaussianRasterizerBatches(nn.Module):
+    def __init__(self, raster_settings):
+        super().__init__()
+        self.raster_settings_list = raster_settings
+
+    def markVisible(self, positions):
+        # Mark visible points (based on frustum culling for camera) with a boolean 
+        with torch.no_grad():
+            visible = []
+            for viewmatrix, projmatrix in zip(self.raster_settings.viewmatrix, self.raster_settings.projmatrix):
+                visible.append(_C.mark_visible(positions, viewmatrix, projmatrix))
+        return visible
+
+    def preprocess_gaussians(self, means3D, scales, rotations, shs, opacities, batched_cuda_args=None):
+        # Invoke C++/CUDA rasterization routine
+        
+            return preprocess_gaussians_batches(
+                means3D,
+                scales,
+                rotations,
+                shs,
+                opacities,
+                self.raster_settings_list,
+                batched_cuda_args)
+
 class GaussianRasterizer(nn.Module):
     def __init__(self, raster_settings):
         super().__init__()
