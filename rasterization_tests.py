@@ -143,7 +143,7 @@ def test_improved_gaussian_rasterizer():
 
     rasterizer=GaussianRasterizerBatches(raster_settings=raster_settings_list)
     start_time = time.time()
-    batched_means2D, batched_rgb, batched_conic_opacity, batched_radii, batched_depths = rasterizer.preprocess_gaussians_batches(
+    batched_means2D, batched_rgb, batched_conic_opacity, batched_radii, batched_depths = rasterizer.preprocess_gaussians(
             means3D=means3D,
             scales=scales,
             rotations=rotations,

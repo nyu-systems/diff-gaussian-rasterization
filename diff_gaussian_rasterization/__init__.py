@@ -31,7 +31,7 @@ def preprocess_gaussians(
     sh,
     opacities,
     raster_settings,
-    cuda_args,
+    cuda_args,flag_batched=False
 ):
     return _PreprocessGaussians.apply(
         means3D,
@@ -40,7 +40,7 @@ def preprocess_gaussians(
         sh,
         opacities,
         raster_settings,
-        cuda_args,
+        cuda_args,flag_batched
     )
 
 class _PreprocessGaussians(torch.autograd.Function):
@@ -52,45 +52,88 @@ class _PreprocessGaussians(torch.autograd.Function):
         rotations,
         sh,
         opacities,
-        raster_settings,
-        cuda_args,
+        raster_settings_list,
+        batched_cuda_args,flag_batched
     ):
 
         # Restructure arguments the way that the C++ lib expects them
-        args = (
-            means3D,
-            scales,
-            rotations,
-            sh,
-            opacities,# 3dgs' parametes.
-            raster_settings.scale_modifier,
-            raster_settings.viewmatrix,
-            raster_settings.projmatrix,
-            raster_settings.tanfovx,
-            raster_settings.tanfovy,
-            raster_settings.image_height,
-            raster_settings.image_width,
-            raster_settings.sh_degree,
-            raster_settings.campos,
-            raster_settings.prefiltered,
-            raster_settings.debug,#raster_settings
-            cuda_args
-        )
+        if flag_batched==False:
+            args = (
+                means3D,
+                scales,
+                rotations,
+                sh,
+                opacities,# 3dgs' parametes.
+                raster_settings.scale_modifier,
+                raster_settings.viewmatrix,
+                raster_settings.projmatrix,
+                raster_settings.tanfovx,
+                raster_settings.tanfovy,
+                raster_settings.image_height,
+                raster_settings.image_width,
+                raster_settings.sh_degree,
+                raster_settings.campos,
+                raster_settings.prefiltered,
+                raster_settings.debug,#raster_settings
+                cuda_args
+            )
 
-        # TODO: update this. 
-        num_rendered, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped = _C.preprocess_gaussians(*args)
+            # TODO: update this. 
+            num_rendered, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped = _C.preprocess_gaussians(*args)
 
-        # Keep relevant tensors for backward
-        ctx.raster_settings = raster_settings
-        ctx.cuda_args = cuda_args
-        ctx.num_rendered = num_rendered
-        ctx.save_for_backward(means3D, scales, rotations, sh, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped)
-        ctx.mark_non_differentiable(radii, depths)
+            # Keep relevant tensors for backward
+            ctx.raster_settings = raster_settings
+            ctx.cuda_args = cuda_args
+            ctx.num_rendered = num_rendered
+            ctx.save_for_backward(means3D, scales, rotations, sh, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped)
+            ctx.mark_non_differentiable(radii, depths)
 
-        # # TODO: double check. means2D is padded to (P, 3) in python. It is (P, 2) in cuda code.
-        # means2D_pad = torch.zeros((means2D.shape[0], 1), dtype = means2D.dtype, device = means2D.device)
-        # means2D = torch.cat((means2D, means2D_pad), dim = 1).contiguous()
-        return means2D, rgb, conic_opacity, radii, depths
+            # # TODO: double check. means2D is padded to (P, 3) in python. It is (P, 2) in cuda code.
+            # means2D_pad = torch.zeros((means2D.shape[0], 1), dtype = means2D.dtype, device = means2D.device)
+            # means2D = torch.cat((means2D, means2D_pad), dim = 1).contiguous()
+            return means2D, rgb, conic_opacity, radii, depths
+
+        else:
+            args_list=[]
+            for raster_settings,cuda_args in zip(raster_settings_list,batched_cuda_args):
+
+                args = (
+                    means3D,
+                    scales,
+                    rotations,
+                    sh,
+                    opacities,# 3dgs' parametes.
+                    raster_settings.scale_modifier,
+                    raster_settings.viewmatrix,
+                    raster_settings.projmatrix,
+                    raster_settings.tanfovx,
+                    raster_settings.tanfovy,
+                    raster_settings.image_height,
+                    raster_settings.image_width,
+                    raster_settings.sh_degree,
+                    raster_settings.campos,
+                    raster_settings.prefiltered,
+                    raster_settings.debug,#raster_settings
+                    cuda_args
+                )
+                args_list.append(args)
+
+            # TODO: update this. 
+            num_rendered, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped = _C.preprocess_gaussians_batches(*args_list)
+
+            # Keep relevant tensors for backward
+            ctx.raster_settings = raster_settings_list
+            ctx.cuda_args = batched_cuda_args
+            ctx.num_rendered = num_rendered
+            ctx.save_for_backward(means3D, scales, rotations, sh, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped)
+            ctx.mark_non_differentiable(radii, depths)
+
+            # # TODO: double check. means2D is padded to (P, 3) in python. It is (P, 2) in cuda code.
+            # means2D_pad = torch.zeros((means2D.shape[0], 1), dtype = means2D.dtype, device = means2D.device)
+            # means2D = torch.cat((means2D, means2D_pad), dim = 1).contiguous()
+            return means2D, rgb, conic_opacity, radii, depths
+
+
 
     @staticmethod # TODO: gradient for conic_opacity is tricky. because cuda render backward generate dL_dconic and dL_dopacity sperately. 
     def backward(ctx, grad_means2D, grad_rgb, grad_conic_opacity, grad_radii, grad_depths):
@@ -320,14 +363,14 @@ class GaussianRasterizerBatches(nn.Module):
     def preprocess_gaussians(self, means3D, scales, rotations, shs, opacities, batched_cuda_args=None):
         # Invoke C++/CUDA rasterization routine
         
-            return preprocess_gaussians_batches(
+            return preprocess_gaussians(
                 means3D,
                 scales,
                 rotations,
                 shs,
                 opacities,
                 self.raster_settings_list,
-                batched_cuda_args)
+                batched_cuda_args,True)
 
 class GaussianRasterizer(nn.Module):
     def __init__(self, raster_settings):
