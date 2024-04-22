@@ -34,7 +34,7 @@ def preprocess_gaussians(
     sh,
     opacities,
     raster_settings,
-    cuda_args,flag_batched=False
+    cuda_args
 ):
     return _PreprocessGaussians.apply(
         means3D,
@@ -43,7 +43,7 @@ def preprocess_gaussians(
         sh,
         opacities,
         raster_settings,
-        cuda_args,flag_batched
+        cuda_args
     )
 
 class _PreprocessGaussians(torch.autograd.Function):
@@ -336,7 +336,7 @@ class GaussianRasterizerBatches(nn.Module):
                 shs,
                 opacities,
                 self.raster_settings_list,
-                batched_cuda_args,True)
+                batched_cuda_args)
 
 class GaussianRasterizer(nn.Module):
     def __init__(self, raster_settings):
