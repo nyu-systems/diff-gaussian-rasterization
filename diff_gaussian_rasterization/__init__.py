@@ -32,7 +32,7 @@ def preprocess_gaussians(
     opacities,
     raster_settings,
     cuda_args,
-):
+    ):
     return _PreprocessGaussians.apply(
         means3D,
         scales,
@@ -459,7 +459,7 @@ def load_image_tiles_by_pos(
     image_height, image_width,
     touched_pixels_rect,
     touched_tiles_rect
-):
+    ):
     return _LoadImageTilesByPos.apply(
         local_image_rect,
         all_tiles_pos,
@@ -474,7 +474,7 @@ def merge_image_tiles_by_pos(
     image_height, image_width,
     touched_pixels_rect,
     touched_tiles_rect
-):
+    ):
     return _MergeImageTilesByPos.apply(
         all_tiles_pos,
         image_tiles,
@@ -482,3 +482,51 @@ def merge_image_tiles_by_pos(
         touched_pixels_rect,
         touched_tiles_rect
     )# return image should be in local coordinate.
+
+
+########################### Optimizer ###########################
+
+
+class FusedAdam(torch.optim.Optimizer):
+    def __init__(self, params, lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-8, weight_decay=0.0):
+        defaults = dict(lr=lr, beta_1=beta_1, beta_2=beta_2, epsilon=epsilon, weight_decay=weight_decay)
+        super(FusedAdam, self).__init__(params, defaults)
+        # print(lr, beta_1, beta_2, epsilon, weight_decay)
+
+    def step(self):
+        for group in self.param_groups:
+            # print(group['params'][-1])
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+
+                grad = p.grad.data
+
+                state = self.state[p]
+
+                # print("state len: ", len(state))
+                # State initialization
+                if len(state) == 0:
+                    state['step'] = 0
+                    # Exponential moving averages of gradient
+                    state['exp_avg'] = torch.zeros_like(p.data, dtype=p.dtype, device=p.device)
+                    # Exponential moving average of squared gradient
+                    state['exp_avg_sq'] = torch.zeros_like(p.data, dtype=p.dtype, device=p.device)
+
+                lr = group['lr']
+                epsilon = group['epsilon']
+                weight_decay = group['weight_decay']
+
+                exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
+                beta_1, beta_2 = group['beta_1'], group['beta_2']
+
+                state['step'] += 1
+                pp, mt, vt = _C.fuse_adam_step(
+                    p, grad, exp_avg, exp_avg_sq, state['step'], 
+                    lr, beta_1, beta_2, epsilon, weight_decay)
+                # print((pp - p).norm())
+                # assert((pp - p).norm() > 0), f"{(pp - p).norm()}"
+                # print(mt)
+                p.data = pp.data
+                exp_avg.data = mt.data
+                exp_avg_sq.data = vt.data
