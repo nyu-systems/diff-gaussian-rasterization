@@ -6,6 +6,7 @@ import torch
 from diff_gaussian_rasterization import (
     GaussianRasterizationSettings,
     GaussianRasterizer,
+    GaussianRasterizerBatches,
 )
 
 
@@ -303,7 +304,7 @@ def test_batched_gaussian_rasterizer_batch_processing():
     )
 
     # Create the GaussianRasterizer for the batch
-    rasterizer = GaussianRasterizer(raster_settings=batched_raster_settings)
+    rasterizer = GaussianRasterizerBatches(raster_settings=batched_raster_settings)
 
     # Set up CUDA arguments for the batch
     cuda_args = get_cuda_args(batched_strategies[0], mode)  # TODO: Check if this is correct for the batch
