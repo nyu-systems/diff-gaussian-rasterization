@@ -149,52 +149,47 @@ PreprocessGaussiansCUDABatches(
 	const torch::Tensor& rotations,
 	const torch::Tensor& sh,
     const torch::Tensor& opacity,//3dgs' parametes.
-	const std::vector<float>& scale_modifier,
-	const std::vector<torch::Tensor>& viewmatrix,
-	const std::vector<torch::Tensor>& projmatrix,
-	const std::vector<float>& tan_fovx, 
-	const std::vector<float>& tan_fovy,
-    const std::vector<int>& image_height,
-    const std::vector<int>& image_width,
-	const std::vector<int>& degree,
-	const std::vector<torch::Tensor>& campos,
-	const std::vector<bool>& prefiltered,//raster_settings
-	const std::vector<bool>& debug,
-	const std::vector<pybind11::dict> &args) {
+	const float scale_modifier,
+	const torch::Tensor& viewmatrix,
+	const torch::Tensor& projmatrix,
+	const torch::Tensor& tan_fovx, 
+	const torch::Tensor& tan_fovy,
+    const int image_height,
+    const int image_width,
+	const int degree,
+	const torch::Tensor& campos,
+    const bool prefiltered,//raster_settings
+	const bool debug,
+	const pybind11::dict &args) {
 
 	if (means3D.ndimension() != 2 || means3D.size(1) != 3) {
 		AT_ERROR("means3D must have dimensions (num_points, 3)");
 	}
 
 	const int P = means3D.size(0);
-	// const int H = image_height;
-	// const int W = image_width;
+    const int num_viewpoints = viewmatrix.size(0);
 
 	// of shape (P, 2). means2D is (P, 2) in cuda. It will be converted to (P, 3) when is sent back to python to meet torch graph's requirement.
-	torch::Tensor means2D = torch::full({P, 2}, 0.0, means3D.options());//TODO: what about require_grads?
+	torch::Tensor means2D = torch::full({num_viewpoints, P, 2}, 0.0, means3D.options());//TODO: what about require_grads?
 	// of shape (P)
-	torch::Tensor depths = torch::full({P}, 0.0, means3D.options());
+	torch::Tensor depths = torch::full({num_viewpoints, P}, 0.0, means3D.options());
 	// of shape (P)
-	torch::Tensor radii = torch::full({P}, 0, means3D.options().dtype(torch::kInt32));
+	torch::Tensor radii = torch::full({num_viewpoints, P}, 0, means3D.options().dtype(torch::kInt32));
 	// of shape (P, 6)
-	torch::Tensor cov3D = torch::full({P, 6}, 0.0, means3D.options());
+	torch::Tensor cov3D = torch::full({num_viewpoints, P, 6}, 0.0, means3D.options());
 	// of shape (P, 4)
-	torch::Tensor conic_opacity = torch::full({P, 4}, 0.0, means3D.options());
+	torch::Tensor conic_opacity = torch::full({num_viewpoints, P, 4}, 0.0, means3D.options());
 	// of shape (P, 3)
-	torch::Tensor rgb = torch::full({P, 3}, 0.0, means3D.options());
+	torch::Tensor rgb = torch::full({num_viewpoints, P, 3}, 0.0, means3D.options());
 	// of shape (P)
-	torch::Tensor clamped = torch::full({P, 3}, false, means3D.options().dtype(at::kBool));
+	torch::Tensor clamped = torch::full({num_viewpoints, P, 3}, false, means3D.options().dtype(at::kBool));
 	//TODO: compare to original GeometryState implementation, this one does not explicitly do gpu memory alignment. 
 	//That may lead to problems. However, pytorch does implicit memory alignment.
 
 	int rendered = 0;//TODO: I could compute rendered here by summing up geomState.tiles_touched. 
 	if(P != 0)
 	{
-		int M = 0;
-		if(sh.size(0) != 0)
-		{
-			M = sh.size(1);
-		}
+        int M = sh.size(0) != 0 ? sh.size(1) : 0;
 
 		rendered = CudaRasterizer::Rasterizer::preprocessForwardBatches(
 			reinterpret_cast<float2*>(means2D.contiguous().data<float>()),//TODO: check whether it supports float2?
@@ -206,18 +201,19 @@ PreprocessGaussiansCUDABatches(
 			clamped.contiguous().data<bool>(),
 			P, degree, M,
 			image_width, image_height,
-			means3D,
-			scales,
-			rotations,
-			sh,
-			opacity, 
+			means3D.contiguous().data<float>(),
+			scales.contiguous().data_ptr<float>(),
+			rotations.contiguous().data_ptr<float>(),
+			sh.contiguous().data_ptr<float>(),
+			opacity.contiguous().data<float>(), 
 			scale_modifier,
-			viewmatrix, 
-			projmatrix,
-			campos,
-			tan_fovx,
-			tan_fovy,
+			viewmatrix.contiguous().data<float>(), 
+			projmatrix.contiguous().data<float>(),
+			campos.contiguous().data<float>(),
+			tan_fovx.contiguous().data<float>(),
+			tan_fovy.contiguous().data<float>(),
 			prefiltered,
+            num_viewpoints,
 			debug,
 			args);
 	}

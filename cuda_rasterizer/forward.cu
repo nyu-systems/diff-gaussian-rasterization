@@ -499,3 +499,152 @@ void FORWARD::preprocess(int P, int D, int M,
 		prefiltered
 		);
 }
+
+
+template<int C>
+__global__ void preprocessCUDABatched(
+    int P, int D, int M,
+    const float* orig_points, const glm::vec3* scales, const float scale_modifier,
+    const glm::vec4* rotations, const float* opacities, const float* shs,
+    bool* clamped, const float* cov3D_precomp, const float* colors_precomp,
+    const float* viewmatrix_arr, const float* projmatrix_arr, const glm::vec3* cam_pos,
+    const int W, int H, const float* focal_x, const float* focal_y,
+    const float* tan_fovx, const float* tan_fovy,
+    int* radii, float2* points_xy_image, float* depths, float* cov3Ds,
+    float* rgb, float4* conic_opacity, const dim3 grid, uint32_t* tiles_touched,
+    bool prefiltered, int num_viewpoints)
+{
+    auto point_idx = cg::this_grid().thread_rank();
+    auto viewpoint_idx = blockIdx.z;
+
+    if (viewpoint_idx >= num_viewpoints || point_idx >= P) return;
+
+    auto idx = viewpoint_idx * P + point_idx;
+    const float* viewmatrix = viewmatrix_arr + viewpoint_idx * 16;
+    const float* projmatrix = projmatrix_arr + viewpoint_idx * 16;
+
+    // Initialize radius and touched tiles to 0. If this isn't changed,
+    // this Gaussian will not be processed further.
+    radii[idx] = 0;
+    tiles_touched[idx] = 0;
+
+    // Perform near culling, quit if outside.
+    float3 p_view;
+    if (!in_frustum(point_idx, orig_points, viewmatrix, projmatrix, prefiltered, p_view)) return;
+
+    // Transform point by projecting
+    float3 p_orig = { orig_points[3 * point_idx], orig_points[3 * point_idx + 1], orig_points[3 * point_idx + 2] };
+    float4 p_hom = transformPoint4x4(p_orig, projmatrix);
+    float p_w = 1.0f / (p_hom.w + 0.0000001f);
+    float3 p_proj = { p_hom.x * p_w, p_hom.y * p_w, p_hom.z * p_w };
+
+    // If 3D covariance matrix is precomputed, use it, otherwise compute
+    // from scaling and rotation parameters.
+    const float* cov3D;
+    if (cov3D_precomp != nullptr) {
+        cov3D = cov3D_precomp + point_idx * 6;
+    } else {
+        computeCov3D(scales[point_idx], scale_modifier, rotations[point_idx], cov3Ds + idx * 6);
+        cov3D = cov3Ds + idx * 6;
+    }
+
+    // Compute 2D screen-space covariance matrix
+    const float focal_x = W / (2.0f * tan_fovx[viewpoint_idx]);
+    const float focal_y = H / (2.0f * tan_fovy[viewpoint_idx]);
+    float3 cov = computeCov2D(p_orig, focal_x, focal_y, tan_fovx[viewpoint_idx], tan_fovy[viewpoint_idx], cov3D, viewmatrix);
+
+    // Invert covariance (EWA algorithm)
+    float det = (cov.x * cov.z - cov.y * cov.y);
+    if (det == 0.0f) return;
+    float det_inv = 1.f / det;
+    float3 conic = { cov.z * det_inv, -cov.y * det_inv, cov.x * det_inv };
+
+    // Compute extent in screen space (by finding eigenvalues of
+    // 2D covariance matrix). Use extent to compute a bounding rectangle
+    // of screen-space tiles that this Gaussian overlaps with. Quit if
+    // rectangle covers 0 tiles.
+    float mid = 0.5f * (cov.x + cov.z);
+    float lambda1 = mid + sqrt(max(0.1f, mid * mid - det));
+    float lambda2 = mid - sqrt(max(0.1f, mid * mid - det));
+    float my_radius = ceil(3.f * sqrt(max(lambda1, lambda2)));
+    float2 point_image = { ndc2Pix(p_proj.x, W), ndc2Pix(p_proj.y, H) };
+    uint2 rect_min, rect_max;
+    getRect(point_image, my_radius, rect_min, rect_max, grid);
+    if ((rect_max.x - rect_min.x) * (rect_max.y - rect_min.y) == 0) return;
+
+    // If colors have been precomputed, use them, otherwise convert
+    // spherical harmonics coefficients to RGB color.
+    if (colors_precomp == nullptr) {
+        glm::vec3 result = computeColorFromSH(point_idx, D, M, (glm::vec3*)orig_points, cam_pos[viewpoint_idx], shs, clamped + idx * 3);
+        rgb[idx * C + 0] = result.x;
+        rgb[idx * C + 1] = result.y;
+        rgb[idx * C + 2] = result.z;
+    }
+
+    // Store some useful helper data for the next steps.
+    depths[idx] = p_view.z;
+    radii[idx] = my_radius;
+    points_xy_image[idx] = point_image;
+
+    // Inverse 2D covariance and opacity neatly pack into one float4
+    conic_opacity[idx] = { conic.x, conic.y, conic.z, opacities[point_idx] };
+    tiles_touched[idx] = (rect_max.y - rect_min.y) * (rect_max.x - rect_min.x);
+}
+
+void FORWARD::preprocess(int P, int D, int M,
+	const float* means3D,
+	const glm::vec3* scales,
+	const float scale_modifier,
+	const glm::vec4* rotations,
+	const float* opacities,
+	const float* shs,
+	bool* clamped,
+	const float* cov3D_precomp,
+	const float* colors_precomp,
+	const float* viewmatrix,
+	const float* projmatrix,
+	const glm::vec3* cam_pos,
+	const int W, int H,
+	const float focal_x, float focal_y,
+	const float tan_fovx, float tan_fovy,
+	int* radii,
+	float2* means2D,
+	float* depths,
+	float* cov3Ds,
+	float* rgb,
+	float4* conic_opacity,
+	const dim3 grid,
+	uint32_t* tiles_touched,
+	bool prefiltered,
+    int num_viewpoints)
+{
+    dim3 block(BLOCK_X, BLOCK_Y, 1);
+    dim3 grid((P + BLOCK_X - 1) / BLOCK_X, 1, num_viewpoints);
+    preprocessCUDABatched<NUM_CHANNELS><<<grid, block>>>(
+		P, D, M,
+		means3D,
+		scales,
+		scale_modifier,
+		rotations,
+		opacities,
+		shs,
+		clamped,
+		cov3D_precomp,
+		colors_precomp,
+		viewmatrix, 
+		projmatrix,
+		cam_pos,
+		W, H,
+		tan_fovx, tan_fovy,
+		focal_x, focal_y,
+		radii,
+		means2D,
+		depths,
+		cov3Ds,
+		rgb,
+		conic_opacity,
+		grid,
+		tiles_touched,
+		prefiltered,
+		);
+}

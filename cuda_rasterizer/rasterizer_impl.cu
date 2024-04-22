@@ -434,20 +434,21 @@ int CudaRasterizer::Rasterizer::preprocessForwardBatches(
 	float* rgb,
 	bool* clamped,//the above are all per-Gaussian intemediate results.
 	const int P, int D, int M,
-	const std::vector<int>& width, std::vector<int>& height,
+	const int width, int height,
 	const float* means3D,
 	const float* scales,
 	const float* rotations,
 	const float* shs,
 	const float* opacities,//3dgs parameters
-	const std::vector<float>& scale_modifier,
-	const std::vector<torch::Tensor>& viewmatrix,
-	const std::vector<torch::Tensor>& projmatrix,
-	const std::vector<float>& cam_pos,
-	const std::vector<float>& tan_fovx, std::vector<float>& tan_fovy,
-	const std::vector<bool>& prefiltered,
-	std::vector<bool>& debug,//raster_settings
-	const std::vector<pybind11::dict> &args)
+	const float scale_modifier,
+	const float* viewmatrix,
+	const float* projmatrix,
+	const float* cam_pos,
+	const float* tan_fovx, float* tan_fovy,
+	const bool prefiltered,
+    const int num_viewpoints,
+	bool debug,//raster_settings
+	const pybind11::dict &args)
 {
 	auto [global_rank, world_size, iteration, log_interval, device, zhx_debug, zhx_time, mode, dist_division_mode, log_folder] = prepareArgs(args);
 	char* log_tmp = new char[500];
@@ -462,13 +463,8 @@ int CudaRasterizer::Rasterizer::preprocessForwardBatches(
 	MyTimerOnGPU timer;
 	// const float focal_y = height / (2.0f * tan_fovy);
 	// const float focal_x = width / (2.0f * tan_fovx);
-	const int num_viewpoints=viewmatrix.size();
 
 	//CONVERT ALL VECTORS TO FLOATSSSSSS PRAPTIIIIIII
-
-	dim3 tile_grid((width + BLOCK_X - 1) / BLOCK_X, (height + BLOCK_Y - 1) / BLOCK_Y, num_viewpoints);
-	dim3 block(BLOCK_X, BLOCK_Y, num_viewpoints);
-	int tile_num = tile_grid.x * tile_grid.y*tile_grid.z;
 
 	// allocate temporary buffer for tiles_touched.
 	// In sep_rendering==True case, we will compute tiles_touched in the renderForward. 

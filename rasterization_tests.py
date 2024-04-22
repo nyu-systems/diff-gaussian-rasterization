@@ -282,11 +282,11 @@ def test_batched_gaussian_rasterizer_batch_processing():
     mode = "train"
 
     # Set up rasterization configuration for the batch
-    batched_tanfovx = [math.tan(camera.FoVx * 0.5) for camera in batched_viewpoint_cameras]
-    batched_tanfovy = [math.tan(camera.FoVy * 0.5) for camera in batched_viewpoint_cameras]
-    batched_viewmatrix = [camera.world_view_transform for camera in batched_viewpoint_cameras]
-    batched_projmatrix = [camera.full_proj_transform for camera in batched_viewpoint_cameras]
-    batched_campos = [camera.camera_center for camera in batched_viewpoint_cameras]
+    batched_tanfovx = torch.stack([math.tan(camera.FoVx * 0.5) for camera in batched_viewpoint_cameras])
+    batched_tanfovy = torch.stack([math.tan(camera.FoVy * 0.5) for camera in batched_viewpoint_cameras])
+    batched_viewmatrix = torch.stack([camera.world_view_transform for camera in batched_viewpoint_cameras])
+    batched_projmatrix = torch.stack([camera.full_proj_transform for camera in batched_viewpoint_cameras])
+    batched_campos = torch.stack([camera.camera_center for camera in batched_viewpoint_cameras])
 
     batched_raster_settings = GaussianRasterizationSettings(
         image_height=int(batched_viewpoint_cameras[0].image_height),
