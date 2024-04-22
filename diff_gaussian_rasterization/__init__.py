@@ -9,11 +9,14 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
-from typing import NamedTuple
-import torch.nn as nn
-import torch
-from . import _C
 import time
+from typing import NamedTuple
+
+import torch
+import torch.nn as nn
+
+from . import _C
+
 
 def cpu_deep_copy_tuple(input_tuple):
     copied_tensors = [item.cpu().clone() if isinstance(item, torch.Tensor) else item for item in input_tuple]
@@ -78,7 +81,11 @@ class _PreprocessGaussians(torch.autograd.Function):
         )
 
         # TODO: update this. 
-        num_rendered, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped = _C.preprocess_gaussians(*args)
+        batch_size = len(raster_settings.tanfovx) if isinstance(raster_settings.tanfovx, list) else 1
+        if batch_size == 1:
+            num_rendered, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped = _C.preprocess_gaussians(*args)
+        else:
+            num_rendered, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped = _C.preprocess_gaussians_batched(*args)
 
         # Keep relevant tensors for backward
         ctx.raster_settings = raster_settings
@@ -320,7 +327,7 @@ class GaussianRasterizerBatches(nn.Module):
     def preprocess_gaussians(self, means3D, scales, rotations, shs, opacities, batched_cuda_args=None):
         # Invoke C++/CUDA rasterization routine
         
-            return preprocess_gaussians_batches(
+            return preprocess_gaussians(
                 means3D,
                 scales,
                 rotations,
