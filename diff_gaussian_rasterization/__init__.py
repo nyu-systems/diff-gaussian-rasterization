@@ -34,7 +34,7 @@ def preprocess_gaussians(
     sh,
     opacities,
     raster_settings,
-    cuda_args,
+    cuda_args,flag_batched=False
 ):
     return _PreprocessGaussians.apply(
         means3D,
@@ -43,7 +43,7 @@ def preprocess_gaussians(
         sh,
         opacities,
         raster_settings,
-        cuda_args,
+        cuda_args,flag_batched
     )
 
 class _PreprocessGaussians(torch.autograd.Function):
@@ -56,7 +56,7 @@ class _PreprocessGaussians(torch.autograd.Function):
         sh,
         opacities,
         raster_settings,
-        cuda_args,
+        cuda_args
     ):
 
         # Restructure arguments the way that the C++ lib expects them
@@ -98,6 +98,8 @@ class _PreprocessGaussians(torch.autograd.Function):
         # means2D_pad = torch.zeros((means2D.shape[0], 1), dtype = means2D.dtype, device = means2D.device)
         # means2D = torch.cat((means2D, means2D_pad), dim = 1).contiguous()
         return means2D, rgb, conic_opacity, radii, depths
+
+
 
     @staticmethod # TODO: gradient for conic_opacity is tricky. because cuda render backward generate dL_dconic and dL_dopacity sperately. 
     def backward(ctx, grad_means2D, grad_rgb, grad_conic_opacity, grad_radii, grad_depths):
@@ -334,7 +336,7 @@ class GaussianRasterizerBatches(nn.Module):
                 shs,
                 opacities,
                 self.raster_settings_list,
-                batched_cuda_args)
+                batched_cuda_args,True)
 
 class GaussianRasterizer(nn.Module):
     def __init__(self, raster_settings):

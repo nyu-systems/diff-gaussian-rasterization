@@ -142,6 +142,88 @@ PreprocessGaussiansCUDA(
 	return std::make_tuple(rendered, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped);
 }
 
+std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+PreprocessGaussiansCUDABatches(
+	const torch::Tensor& means3D,
+	const torch::Tensor& scales,
+	const torch::Tensor& rotations,
+	const torch::Tensor& sh,
+    const torch::Tensor& opacity,//3dgs' parametes.
+	const std::vector<float>& scale_modifier,
+	const std::vector<torch::Tensor>& viewmatrix,
+	const std::vector<torch::Tensor>& projmatrix,
+	const std::vector<float>& tan_fovx, 
+	const std::vector<float>& tan_fovy,
+    const std::vector<int>& image_height,
+    const std::vector<int>& image_width,
+	const std::vector<int>& degree,
+	const std::vector<torch::Tensor>& campos,
+	const std::vector<bool>& prefiltered,//raster_settings
+	const std::vector<bool>& debug,
+	const std::vector<pybind11::dict> &args) {
+
+	if (means3D.ndimension() != 2 || means3D.size(1) != 3) {
+		AT_ERROR("means3D must have dimensions (num_points, 3)");
+	}
+
+	const int P = means3D.size(0);
+	// const int H = image_height;
+	// const int W = image_width;
+
+	// of shape (P, 2). means2D is (P, 2) in cuda. It will be converted to (P, 3) when is sent back to python to meet torch graph's requirement.
+	torch::Tensor means2D = torch::full({P, 2}, 0.0, means3D.options());//TODO: what about require_grads?
+	// of shape (P)
+	torch::Tensor depths = torch::full({P}, 0.0, means3D.options());
+	// of shape (P)
+	torch::Tensor radii = torch::full({P}, 0, means3D.options().dtype(torch::kInt32));
+	// of shape (P, 6)
+	torch::Tensor cov3D = torch::full({P, 6}, 0.0, means3D.options());
+	// of shape (P, 4)
+	torch::Tensor conic_opacity = torch::full({P, 4}, 0.0, means3D.options());
+	// of shape (P, 3)
+	torch::Tensor rgb = torch::full({P, 3}, 0.0, means3D.options());
+	// of shape (P)
+	torch::Tensor clamped = torch::full({P, 3}, false, means3D.options().dtype(at::kBool));
+	//TODO: compare to original GeometryState implementation, this one does not explicitly do gpu memory alignment. 
+	//That may lead to problems. However, pytorch does implicit memory alignment.
+
+	int rendered = 0;//TODO: I could compute rendered here by summing up geomState.tiles_touched. 
+	if(P != 0)
+	{
+		int M = 0;
+		if(sh.size(0) != 0)
+		{
+			M = sh.size(1);
+		}
+
+		rendered = CudaRasterizer::Rasterizer::preprocessForwardBatches(
+			reinterpret_cast<float2*>(means2D.contiguous().data<float>()),//TODO: check whether it supports float2?
+			depths.contiguous().data<float>(),
+			radii.contiguous().data<int>(),
+			cov3D.contiguous().data<float>(),
+			reinterpret_cast<float4*>(conic_opacity.contiguous().data<float>()),
+			rgb.contiguous().data<float>(),
+			clamped.contiguous().data<bool>(),
+			P, degree, M,
+			image_width, image_height,
+			means3D,
+			scales,
+			rotations,
+			sh,
+			opacity, 
+			scale_modifier,
+			viewmatrix, 
+			projmatrix,
+			campos,
+			tan_fovx,
+			tan_fovy,
+			prefiltered,
+			debug,
+			args);
+	}
+	return std::make_tuple(rendered, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped);
+}
+
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
   PreprocessGaussiansBackwardCUDA(

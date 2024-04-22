@@ -424,6 +424,101 @@ int CudaRasterizer::Rasterizer::preprocessForward(
 	return num_rendered;
 }
 
+
+int CudaRasterizer::Rasterizer::preprocessForwardBatches(
+	float2* means2D,
+	float* depths,
+	int* radii,
+	float* cov3D,
+	float4* conic_opacity,
+	float* rgb,
+	bool* clamped,//the above are all per-Gaussian intemediate results.
+	const int P, int D, int M,
+	const std::vector<int>& width, std::vector<int>& height,
+	const float* means3D,
+	const float* scales,
+	const float* rotations,
+	const float* shs,
+	const float* opacities,//3dgs parameters
+	const std::vector<float>& scale_modifier,
+	const std::vector<torch::Tensor>& viewmatrix,
+	const std::vector<torch::Tensor>& projmatrix,
+	const std::vector<float>& cam_pos,
+	const std::vector<float>& tan_fovx, std::vector<float>& tan_fovy,
+	const std::vector<bool>& prefiltered,
+	std::vector<bool>& debug,//raster_settings
+	const std::vector<pybind11::dict> &args)
+{
+	auto [global_rank, world_size, iteration, log_interval, device, zhx_debug, zhx_time, mode, dist_division_mode, log_folder] = prepareArgs(args);
+	char* log_tmp = new char[500];
+
+	// print out the environment variables
+	if (mode == "train" && zhx_debug && iteration % log_interval == 1) {
+		sprintf(log_tmp, "world_size: %d, global_rank: %d, iteration: %d, log_folder: %s, zhx_debug: %d, zhx_time: %d, device: %d, log_interval: %d, dist_division_mode: %s", 
+				world_size, global_rank, iteration, log_folder.c_str(), zhx_debug, zhx_time, device, log_interval, dist_division_mode.c_str());
+		save_log_in_file(iteration, global_rank, world_size, log_folder, "cuda", log_tmp);
+	}
+
+	MyTimerOnGPU timer;
+	// const float focal_y = height / (2.0f * tan_fovy);
+	// const float focal_x = width / (2.0f * tan_fovx);
+	const int num_viewpoints=viewmatrix.size();
+
+	//CONVERT ALL VECTORS TO FLOATSSSSSS PRAPTIIIIIII
+
+	dim3 tile_grid((width + BLOCK_X - 1) / BLOCK_X, (height + BLOCK_Y - 1) / BLOCK_Y, num_viewpoints);
+	dim3 block(BLOCK_X, BLOCK_Y, num_viewpoints);
+	int tile_num = tile_grid.x * tile_grid.y*tile_grid.z;
+
+	// allocate temporary buffer for tiles_touched.
+	// In sep_rendering==True case, we will compute tiles_touched in the renderForward. 
+	// TODO: remove it later by modifying FORWARD::preprocess when we deprecate sep_rendering==False case
+	uint32_t* tiles_touched_temp_buffer;
+	CHECK_CUDA(cudaMalloc(&tiles_touched_temp_buffer, P * sizeof(uint32_t)), debug);
+	CHECK_CUDA(cudaMemset(tiles_touched_temp_buffer, 0, P * sizeof(uint32_t)), debug);
+
+	timer.start("10 preprocess");
+	// Run preprocessing per-Gaussian (transformation, bounding, conversion of SHs to RGB)
+	CHECK_CUDA(FORWARD::preprocess(
+		P, D, M,
+		means3D,
+		(glm::vec3*)scales,
+		scale_modifier,
+		(glm::vec4*)rotations,
+		opacities,
+		shs,
+		clamped,
+		nullptr,//cov3D_precomp,
+		nullptr,//colors_precomp,TODO: this is correct?
+		viewmatrix, projmatrix,
+		(glm::vec3*)cam_pos,
+		width, height,
+		focal_x, focal_y,
+		tan_fovx, tan_fovy,
+		radii,
+		means2D,
+		depths,
+		cov3D,
+		rgb,
+		conic_opacity,
+		tile_grid,
+		tiles_touched_temp_buffer,
+		prefiltered
+	), debug)
+	timer.stop("10 preprocess");
+
+	int num_rendered = 0;//TODO: should I calculate this here?
+
+	// Print out timing information
+	if (zhx_time && iteration % log_interval == 1) {
+		timer.printAllTimes(iteration, world_size, global_rank, log_folder, true);
+	}
+	delete log_tmp;
+	// free temporary buffer for tiles_touched. TODO: remove it. 
+	CHECK_CUDA(cudaFree(tiles_touched_temp_buffer), debug);
+	return num_rendered;
+}
+
 void CudaRasterizer::Rasterizer::preprocessBackward(
 	const int* radii,
 	const float* cov3D,
