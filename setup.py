@@ -25,6 +25,7 @@ setup(
             "cuda_rasterizer/forward.cu",
             "cuda_rasterizer/backward.cu",
             "cuda_rasterizer/timers.cu",
+            "fuse_adam.cu",
             "rasterize_points.cu",
             "ext.cpp"],
             headers=[

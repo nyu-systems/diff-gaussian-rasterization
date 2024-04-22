@@ -11,6 +11,7 @@
 
 #include <torch/extension.h>
 #include "rasterize_points.h"
+#include "fuse_adam.h"
 #include "cuda_rasterizer/config.h"
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
@@ -30,4 +31,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("get_pixels_compute_locally_and_in_rect", &GetPixelsComputeLocallyAndInRect);
 
   m.def("get_block_XY", &GetBlockXY);
+
+  m.def("fuse_adam_step", &FuseAdamStepCUDA);
+
 }
