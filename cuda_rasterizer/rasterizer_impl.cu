@@ -461,10 +461,10 @@ int CudaRasterizer::Rasterizer::preprocessForwardBatches(
 	}
 
 	MyTimerOnGPU timer;
-	// const float focal_y = height / (2.0f * tan_fovy);
-	// const float focal_x = width / (2.0f * tan_fovx);
 
 	//CONVERT ALL VECTORS TO FLOATSSSSSS PRAPTIIIIIII
+
+    dim3 tile_grid(cdiv(P, ONE_DIM_BLOCK_SIZE), num_viewpoints);
 
 	// allocate temporary buffer for tiles_touched.
 	// In sep_rendering==True case, we will compute tiles_touched in the renderForward. 
@@ -475,7 +475,7 @@ int CudaRasterizer::Rasterizer::preprocessForwardBatches(
 
 	timer.start("10 preprocess");
 	// Run preprocessing per-Gaussian (transformation, bounding, conversion of SHs to RGB)
-	CHECK_CUDA(FORWARD::preprocess(
+	CHECK_CUDA(FORWARD::preprocess_batch(
 		P, D, M,
 		means3D,
 		(glm::vec3*)scales,
@@ -486,10 +486,10 @@ int CudaRasterizer::Rasterizer::preprocessForwardBatches(
 		clamped,
 		nullptr,//cov3D_precomp,
 		nullptr,//colors_precomp,TODO: this is correct?
-		viewmatrix, projmatrix,
+		viewmatrix, 
+        projmatrix,
 		(glm::vec3*)cam_pos,
 		width, height,
-		focal_x, focal_y,
 		tan_fovx, tan_fovy,
 		radii,
 		means2D,

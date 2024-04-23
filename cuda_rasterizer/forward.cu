@@ -471,7 +471,7 @@ void FORWARD::preprocess(int P, int D, int M,
 	uint32_t* tiles_touched,
 	bool prefiltered)
 {
-	preprocessCUDA<NUM_CHANNELS> << <(P + ONE_DIM_BLOCK_SIZE - 1) / ONE_DIM_BLOCK_SIZE, ONE_DIM_BLOCK_SIZE >> > (
+	preprocessCUDA<NUM_CHANNELS> << <cdiv(P, ONE_DIM_BLOCK_SIZE), ONE_DIM_BLOCK_SIZE >> > (
 		P, D, M,
 		means3D,
 		scales,
@@ -508,14 +508,13 @@ __global__ void preprocessCUDABatched(
     const glm::vec4* rotations, const float* opacities, const float* shs,
     bool* clamped, const float* cov3D_precomp, const float* colors_precomp,
     const float* viewmatrix_arr, const float* projmatrix_arr, const glm::vec3* cam_pos,
-    const int W, int H, const float* focal_x, const float* focal_y,
-    const float* tan_fovx, const float* tan_fovy,
+    const int W, int H, const float* tan_fovx, const float* tan_fovy,
     int* radii, float2* points_xy_image, float* depths, float* cov3Ds,
     float* rgb, float4* conic_opacity, const dim3 grid, uint32_t* tiles_touched,
     bool prefiltered, int num_viewpoints)
 {
     auto point_idx = cg::this_grid().thread_rank();
-    auto viewpoint_idx = blockIdx.z;
+    auto viewpoint_idx = blockIdx.y;
 
     if (viewpoint_idx >= num_viewpoints || point_idx >= P) return;
 
@@ -591,7 +590,7 @@ __global__ void preprocessCUDABatched(
     tiles_touched[idx] = (rect_max.y - rect_min.y) * (rect_max.x - rect_min.x);
 }
 
-void FORWARD::preprocess(int P, int D, int M,
+void FORWARD::preprocess_batch(int P, int D, int M,
 	const float* means3D,
 	const glm::vec3* scales,
 	const float scale_modifier,
@@ -605,8 +604,7 @@ void FORWARD::preprocess(int P, int D, int M,
 	const float* projmatrix,
 	const glm::vec3* cam_pos,
 	const int W, int H,
-	const float focal_x, float focal_y,
-	const float tan_fovx, float tan_fovy,
+	const float* tan_fovx, float* tan_fovy,
 	int* radii,
 	float2* means2D,
 	float* depths,
@@ -618,9 +616,7 @@ void FORWARD::preprocess(int P, int D, int M,
 	bool prefiltered,
     int num_viewpoints)
 {
-    dim3 block(BLOCK_X, BLOCK_Y, 1);
-    dim3 grid((P + BLOCK_X - 1) / BLOCK_X, 1, num_viewpoints);
-    preprocessCUDABatched<NUM_CHANNELS><<<grid, block>>>(
+    preprocessCUDABatched<NUM_CHANNELS><<<grid, ONE_DIM_BLOCK_SIZE>>>(
 		P, D, M,
 		means3D,
 		scales,
@@ -636,7 +632,6 @@ void FORWARD::preprocess(int P, int D, int M,
 		cam_pos,
 		W, H,
 		tan_fovx, tan_fovy,
-		focal_x, focal_y,
 		radii,
 		means2D,
 		depths,
