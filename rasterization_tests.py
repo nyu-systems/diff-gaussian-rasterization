@@ -3,11 +3,7 @@ import time
 
 import torch
 
-from diff_gaussian_rasterization import (
-    GaussianRasterizationSettings,
-    GaussianRasterizer,
-    GaussianRasterizerBatches,
-)
+import diff_gaussian_rasterization import (GaussianRasterizationSettings,GaussianRasterizer,GaussianRasterizerBatches)
 
 
 def get_cuda_args(strategy, mode="train"):

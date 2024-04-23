@@ -511,7 +511,7 @@ __global__ void preprocessCUDABatched(
     const int W, int H, const float* tan_fovx, const float* tan_fovy,
     int* radii, float2* points_xy_image, float* depths, float* cov3Ds,
     float* rgb, float4* conic_opacity, const dim3 grid, uint32_t* tiles_touched,
-    bool prefiltered, int num_viewpoints)
+    bool prefiltered, const int num_viewpoints)
 {
     auto point_idx = cg::this_grid().thread_rank();
     auto viewpoint_idx = blockIdx.y;
@@ -614,7 +614,7 @@ void FORWARD::preprocess_batch(int P, int D, int M,
 	const dim3 grid,
 	uint32_t* tiles_touched,
 	bool prefiltered,
-    int num_viewpoints)
+    const int num_viewpoints)
 {
     preprocessCUDABatched<NUM_CHANNELS><<<grid, ONE_DIM_BLOCK_SIZE>>>(
 		P, D, M,
@@ -641,5 +641,6 @@ void FORWARD::preprocess_batch(int P, int D, int M,
 		grid,
 		tiles_touched,
 		prefiltered,
+		num_viewpoints
 		);
 }

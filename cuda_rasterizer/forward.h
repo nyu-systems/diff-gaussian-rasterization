@@ -72,7 +72,7 @@ namespace FORWARD
         const dim3 grid,
         uint32_t* tiles_touched,
         bool prefiltered,
-        int num_viewpoints
+        const int num_viewpoints
     );
 
 	// Main rasterization method.

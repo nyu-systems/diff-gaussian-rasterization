@@ -499,7 +499,8 @@ int CudaRasterizer::Rasterizer::preprocessForwardBatches(
 		conic_opacity,
 		tile_grid,
 		tiles_touched_temp_buffer,
-		prefiltered
+		prefiltered,
+		num_viewpoints
 	), debug)
 	timer.stop("10 preprocess");
 

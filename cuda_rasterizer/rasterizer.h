@@ -65,6 +65,31 @@ namespace CudaRasterizer
 			bool debug,//raster_settings
 			const pybind11::dict &args);
 
+		static int preprocessForwardBatches(
+			float2* means2D,
+			float* depths,
+			int* radii,
+			float* cov3D,
+			float4* conic_opacity,
+			float* rgb,
+			bool* clamped,//the above are all per-Gaussian intemediate results.
+			const int P, int D, int M,
+			const int width, int height,
+			const float* means3D,
+			const float* scales,
+			const float* rotations,
+			const float* shs,
+			const float* opacities,//3dgs parameters
+			const float scale_modifier,
+			const float* viewmatrix,
+			const float* projmatrix,
+			const float* cam_pos,
+			const float* tan_fovx, float* tan_fovy,
+			const bool prefiltered,
+			const int num_viewpoints,
+			bool debug,//raster_settings
+			const pybind11::dict &args);
+
 		static void preprocessBackward(
 			const int* radii,
 			const float* cov3D,
