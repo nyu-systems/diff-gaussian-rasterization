@@ -316,7 +316,7 @@ def test_batched_gaussian_rasterizer_batch_processing():
         rotations=rotations,
         shs=shs,
         opacities=opacity,
-        cuda_args=cuda_args
+        batched_cuda_args=cuda_args
     )
 
     if mode == "train":
