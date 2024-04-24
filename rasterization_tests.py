@@ -199,6 +199,8 @@ def test_batched_gaussian_rasterizer():
     batched_means2D = []
     batched_radii = []
 
+    start_time = time.time()
+    
     for i, (viewpoint_camera, strategy) in enumerate(zip(batched_viewpoint_cameras, batched_strategies)):
         ########## [START] Prepare CUDA Rasterization Settings ##########
         cuda_args = get_cuda_args(strategy, mode)
@@ -243,6 +245,9 @@ def test_batched_gaussian_rasterizer():
         batched_screenspace_params.append(screenspace_params)
         batched_radii.append(radii)
 
+    end_time = time.time()
+    preprocess_time = end_time - start_time
+    print(f"Time taken by test_batched_gaussian_rasterizer: {preprocess_time:.4f} seconds")
     # Perform further operations with the batched results
     # Test results and performance
     
@@ -256,6 +261,7 @@ def test_batched_gaussian_rasterizer_batch_processing():
     shs = torch.randn(num_gaussians, 9).cuda()
     opacity = torch.randn(num_gaussians, 1).cuda()
 
+    start_time = time.time()
     # Set up the viewpoint cameras
     batched_viewpoint_cameras = []
     for _ in range(num_batches):
@@ -318,6 +324,9 @@ def test_batched_gaussian_rasterizer_batch_processing():
         opacities=opacity,
         batched_cuda_args=cuda_args
     )
+    end_time = time.time()
+    preprocess_time = end_time - start_time
+    print(f"Time taken by test_batched_gaussian_rasterizer_batch_processing: {preprocess_time:.4f} seconds")
 
     if mode == "train":
         batched_means2D.retain_grad()
