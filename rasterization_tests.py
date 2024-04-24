@@ -234,8 +234,8 @@ def test_batched_gaussian_rasterizer():
             cuda_args=cuda_args
         )
 
-        if mode == "train":
-            means2D.retain_grad()
+        # if mode == "train":
+        #     means2D.retain_grad()
 
         batched_means2D.append(means2D)
         screenspace_params = [means2D, rgb, conic_opacity, radii, depths]
@@ -282,8 +282,8 @@ def test_batched_gaussian_rasterizer_batch_processing():
     mode = "train"
 
     # Set up rasterization configuration for the batch
-    batched_tanfovx = torch.stack([math.tan(camera.FoVx * 0.5) for camera in batched_viewpoint_cameras])
-    batched_tanfovy = torch.stack([math.tan(camera.FoVy * 0.5) for camera in batched_viewpoint_cameras])
+    batched_tanfovx = torch.tensor([math.tan(camera.FoVx * 0.5) for camera in batched_viewpoint_cameras])
+    batched_tanfovy = torch.tensor([math.tan(camera.FoVy * 0.5) for camera in batched_viewpoint_cameras])
     batched_viewmatrix = torch.stack([camera.world_view_transform for camera in batched_viewpoint_cameras])
     batched_projmatrix = torch.stack([camera.full_proj_transform for camera in batched_viewpoint_cameras])
     batched_campos = torch.stack([camera.camera_center for camera in batched_viewpoint_cameras])
@@ -335,6 +335,6 @@ def test_batched_gaussian_rasterizer_batch_processing():
 
 
 if __name__ == "__main__":
-    test_gaussian_rasterizer_time()
+    test_batched_gaussian_rasterizer()
     test_batched_gaussian_rasterizer_batch_processing()
     
