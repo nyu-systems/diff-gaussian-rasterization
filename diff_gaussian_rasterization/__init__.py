@@ -325,7 +325,7 @@ class _FusedLoss(torch.autograd.Function):
     )
     
     l1_loss, dl1_dimage = _C.fused_l1_loss(*args) # loss: return float or tensor?
-    l1_loss = torch.tensor(l1_loss, device=image.device)
+    # l1_loss = torch.tensor(l1_loss, device=image.device)
     
     # TODO: SSIM loss implementation.
     loss = l1_loss

@@ -353,6 +353,22 @@ __global__ void L1LossCUDA(
   }
 }
 
+__global__ void L1ReduceLossCUDA(
+  float *l1output, // channels * height
+  int channels,
+  int height,
+  float *loss // scalar
+)
+{
+  // This kernel should be operated by only one thread.
+  float l = 0;
+  for (int i = 0; i < channels * height; i++)
+  {
+    l += l1output[i];
+  }
+  *loss = l;
+}
+
 /////////////////////////////// Preprocess ///////////////////////////////
 
 
@@ -886,7 +902,7 @@ void CudaRasterizer::Rasterizer::renderBackward(
 
 
 //////////////////// Loss ////////////////////
-float CudaRasterizer::Rasterizer::l1lossForwardBackward(
+void CudaRasterizer::Rasterizer::l1lossForwardBackward(
   float *image,
   float *gt_image,
   bool *mask,
@@ -894,12 +910,13 @@ float CudaRasterizer::Rasterizer::l1lossForwardBackward(
   int height,
   int width,
   float lambda_dssim,
+  float *loss,
   float *dL_dimage
 )
 {
   // L1 loss.
   float *l1output;
-  cudaMallocManaged(&l1output, channels * height * sizeof(float));
+  cudaMalloc(&l1output, channels * height * sizeof(float));
 
   int blockSize = std::min(width, 1024); // Try to cover a whole row with one block.
   dim3 dimGrid(channels, height);
@@ -916,14 +933,15 @@ float CudaRasterizer::Rasterizer::l1lossForwardBackward(
     dL_dimage
   );
   
-  cudaDeviceSynchronize(); // **Important: Sync issue occurs without this line.
+  // DO NOT use sync: block all CPU operations.
+  // cudaDeviceSynchronize(); // **Important: Sync issue occurs without this line.
 
-  float Ll1 = 0;
-  for (int i = 0; i < channels * height; i++)
-  {
-    Ll1 += l1output[i];
-  }
+  L1ReduceLossCUDA<<<1, 1>>>(
+    l1output,
+    channels,
+    height,
+    loss
+  );
+
   cudaFree(l1output);
-
-  return Ll1;
 }

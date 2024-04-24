@@ -154,7 +154,7 @@ namespace CudaRasterizer
     
     /////////////////////////////// Loss ///////////////////////////////
 
-    static float l1lossForwardBackward(
+    static void l1lossForwardBackward(
       float *image,
       float *gt_image,
       bool *mask,
@@ -162,6 +162,7 @@ namespace CudaRasterizer
       int height,
       int width,
       float lambda_dssim,
+      float *loss,
       float *dL_dimage);
 
 
