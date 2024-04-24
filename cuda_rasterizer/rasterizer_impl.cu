@@ -17,7 +17,6 @@
 #include <numeric>
 #include <string>
 #include <cstdlib>
-#include <cmath>
 #include <chrono>
 #include <cuda.h>
 #include "cuda_runtime.h"
@@ -307,8 +306,9 @@ __global__ void L1LossCUDA(
   int channels,
   int height,
   int width,
-  int lambda_dssim,
-  float *output
+  float lambda_dssim,
+  float *output,
+  float *dL_dimage
 )
 {
   int c = blockIdx.x;
@@ -318,13 +318,26 @@ __global__ void L1LossCUDA(
 
   extern __shared__ float Row[];
 
-  // L1 loss.
+  // Pixel-wise L1 loss (forward & backward).
   for (int i = idx; i < width; i += stride)
   {
+    float grad = 0;
     float pixel = image[c * height * width + row * width + idx];
-    pixel = std::abs(pixel - gt_image[c * height * width + row * width + idx]);
+    pixel = pixel - gt_image[c * height * width + row * width + idx];
+    if (pixel >= 0)
+    {
+      grad = 1 - lambda_dssim;
+    }
+    else
+    {
+      grad = lambda_dssim - 1;
+      pixel *= -1;
+    }
+
     pixel *= mask[row * width + idx];
     Row[i] = pixel;
+    grad *= mask[row * width + idx];
+    dL_dimage[c * height * width + row * width + idx] = grad;
   }
   __syncthreads();
   
@@ -873,14 +886,15 @@ void CudaRasterizer::Rasterizer::renderBackward(
 
 
 //////////////////// Loss ////////////////////
-float CudaRasterizer::Rasterizer::lossForward(
+float CudaRasterizer::Rasterizer::l1lossForwardBackward(
   float *image,
   float *gt_image,
   bool *mask,
   int channels,
   int height,
   int width,
-  int lambda_dssim
+  float lambda_dssim,
+  float *dL_dimage
 )
 {
   // L1 loss.
@@ -898,10 +912,11 @@ float CudaRasterizer::Rasterizer::lossForward(
     height,
     width,
     lambda_dssim,
-    l1output
+    l1output,
+    dL_dimage
   );
   
-  cudaDeviceSynchronize();
+  cudaDeviceSynchronize(); // **Important: Sync issue occurs without this line.
 
   float Ll1 = 0;
   for (int i = 0; i < channels * height; i++)
@@ -910,10 +925,5 @@ float CudaRasterizer::Rasterizer::lossForward(
   }
   cudaFree(l1output);
 
-  // SSIM loss.
-
-  // Final loss.
-  float loss = Ll1;
-
-  return loss;
+  return Ll1;
 }

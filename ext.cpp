@@ -21,7 +21,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("render_gaussians", &RenderGaussiansCUDA);
   m.def("render_gaussians_backward", &RenderGaussiansBackwardCUDA);
   m.def("get_local2j_ids_bool", &GetLocal2jIdsBoolCUDA);
-  m.def("fused_loss", &FusedLossCUDA);
+  m.def("fused_l1_loss", &FusedL1LossCUDA);
 
   // Image Distribution Utilities
   m.def("get_touched_locally", &GetTouchedLocally);

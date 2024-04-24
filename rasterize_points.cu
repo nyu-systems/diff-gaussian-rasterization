@@ -401,24 +401,29 @@ RenderGaussiansBackwardCUDA(
 
 /////////////////////////////// Loss ///////////////////////////////
 
-float FusedLossCUDA(
+std::tuple<float, torch::Tensor>
+FusedL1LossCUDA(
   torch::Tensor& image,
   torch::Tensor& gt_image,
   torch::Tensor& mask,
   float lambda_dssim
 )
 {
-  float loss = CudaRasterizer::Rasterizer::lossForward(
+  int C = image.size(0);
+  int H = image.size(1);
+  int W = image.size(2);
+  torch::Tensor dL_dimage = torch::zeros({C, H, W}, image.options());
+
+  float loss = CudaRasterizer::Rasterizer::l1lossForwardBackward(
     image.contiguous().data<float>(),
     gt_image.contiguous().data<float>(),
     mask.contiguous().data<bool>(),
-    image.size(0),
-    image.size(1),
-    image.size(2),
-    lambda_dssim
+    C, H, W,
+    lambda_dssim,
+    dL_dimage.contiguous().data<float>()
   );
   
-  return loss;
+  return std::make_tuple(loss, dL_dimage);
 }
 
 /////////////////////////////// Utility tools ///////////////////////////////

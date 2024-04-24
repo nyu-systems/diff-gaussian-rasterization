@@ -166,7 +166,8 @@ RenderGaussiansBackwardCUDA(
 
 /////////////////////////////// Loss ///////////////////////////////
 
-float FusedLossCUDA(
+std::tuple<float, torch::Tensor>
+FusedL1LossCUDA(
   torch::Tensor& image,
   torch::Tensor& gt_image,
   torch::Tensor& mask,

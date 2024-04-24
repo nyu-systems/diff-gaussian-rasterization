@@ -15,6 +15,8 @@ import torch
 from . import _C
 import time
 
+from utils.loss_utils import pixelwise_ssim_with_mask
+
 def cpu_deep_copy_tuple(input_tuple):
     copied_tensors = [item.cpu().clone() if isinstance(item, torch.Tensor) else item for item in input_tuple]
     return tuple(copied_tensors)
@@ -322,13 +324,30 @@ class _FusedLoss(torch.autograd.Function):
       lambda_dssim
     )
     
-    loss = _C.fused_loss(*args)
+    l1_loss, dl1_dimage = _C.fused_l1_loss(*args) # loss: return float or tensor?
+    l1_loss = torch.tensor(l1_loss, device=image.device)
+    
+    # TODO: SSIM loss implementation.
+    loss = l1_loss
+    
+    ctx.save_for_backward(dl1_dimage)
+    
     return loss
   
   @staticmethod
-  def backward(ctx):
-    # TODO
-    pass
+  def backward(ctx, grad_loss):
+    (dl1_dimage,) = ctx.saved_tensors
+
+    dL_dimage = dl1_dimage * grad_loss
+    
+    grads = (
+      dL_dimage.contiguous(),
+      None,
+      None,
+      None
+    )
+    
+    return grads
 
 
 
