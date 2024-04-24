@@ -111,9 +111,7 @@ def test_improved_gaussian_rasterizer():
     pipe.debug = False
     mode = "train"
 
-    batched_rasterizers = []
     batched_cuda_args = []
-    batched_screenspace_params = []
     batched_means2D = []
     batched_radii = []
     raster_settings_list=[]
@@ -236,6 +234,7 @@ def test_batched_gaussian_rasterizer():
             cuda_args=cuda_args
         )
 
+        # TODO: make the below work
         # if mode == "train":
         #     means2D.retain_grad()
 
@@ -328,17 +327,17 @@ def test_batched_gaussian_rasterizer_batch_processing():
     preprocess_time = end_time - start_time
     print(f"Time taken by test_batched_gaussian_rasterizer_batch_processing: {preprocess_time:.4f} seconds")
 
-    if mode == "train":
-        batched_means2D.retain_grad()
+    # TODO: make the below work
+    # if mode == "train":
+    #     batched_means2D.retain_grad()
 
-    batched_screenspace_params = [batched_means2D, batched_rgb, batched_conic_opacity, batched_radii, batched_depths]
 
     # Perform assertions on the preprocessed data
-    assert batched_means2D.shape == (num_gaussians, num_batches, 2)
-    assert batched_rgb.shape == (num_gaussians, num_batches, 3)
-    assert batched_conic_opacity.shape == (num_gaussians, num_batches, 1)
-    assert batched_radii.shape == (num_gaussians, num_batches)
-    assert batched_depths.shape == (num_gaussians, num_batches)
+    assert batched_means2D.shape == (num_batches, num_gaussians, 2)
+    assert batched_rgb.shape == (num_batches, num_gaussians, 3)
+    assert batched_conic_opacity.shape == (num_batches, num_gaussians, 1)
+    assert batched_radii.shape == (num_batches, num_gaussians)
+    assert batched_depths.shape == (num_batches, num_gaussians)
 
 
 
