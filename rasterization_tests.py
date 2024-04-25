@@ -272,19 +272,36 @@ def test_batched_gaussian_rasterizer_batch_processing():
     return batched_means2D, batched_radii, batched_screenspace_params
 
 
-def assert_tensor_equal(tensor1, tensor2):
-    return torch.all(torch.eq(tensor1, tensor2))
+def compare_tensors(tensor1, tensor2):
+    if tensor1.shape != tensor2.shape:
+        print("Tensors have different shapes:")
+        print("Tensor 1 shape:", tensor1.shape)
+        print("Tensor 2 shape:", tensor2.shape)
+        return False
+
+    equality_matrix = torch.eq(tensor1, tensor2)
+    if torch.all(equality_matrix):
+        print("All values in the tensors are equal.")
+        return True
+    else:
+        print("Tensors have non-matching values.")
+        non_matching_indices = torch.where(equality_matrix == False)
+        for idx in zip(*non_matching_indices):
+            value1 = tensor1[idx].item()
+            value2 = tensor2[idx].item()
+            print(f"Non-matching values at index {idx}: {value1} != {value2}")
+        return False
 
 if __name__ == "__main__":
     batched_means2D, batched_radii, batched_screenspace_params = test_batched_gaussian_rasterizer()
     batched_means2D_batch_processed, batched_radii_batch_processed, batched_screenspace_params_batch_processed = test_batched_gaussian_rasterizer_batch_processing()
         
-    assert assert_tensor_equal(batched_means2D, batched_means2D_batch_processed)
-    assert assert_tensor_equal(batched_radii, batched_radii_batch_processed)
+    assert compare_tensors(batched_means2D, batched_means2D_batch_processed)
+    assert compare_tensors(batched_radii, batched_radii_batch_processed)
     assert len(batched_screenspace_params) == len(batched_screenspace_params_batch_processed)
     for i in range(len(batched_screenspace_params)):
         assert len(batched_screenspace_params[i]) == len(batched_screenspace_params_batch_processed[i])
         for j in range(len(batched_screenspace_params[i])):
-            assert assert_tensor_equal(batched_screenspace_params[i][j], batched_screenspace_params_batch_processed[i][j])
+            assert compare_tensors(batched_screenspace_params[i][j], batched_screenspace_params_batch_processed[i][j])
 
     
