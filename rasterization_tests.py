@@ -8,6 +8,7 @@ from diff_gaussian_rasterization import (
     GaussianRasterizer,
     GaussianRasterizerBatches,
 )
+
 num_gaussians = 10000
 num_batches=1
 means3D = torch.randn(num_gaussians, 3).cuda()
@@ -82,11 +83,7 @@ def test_gaussian_rasterizer_time():
     print(f"Time taken by preprocess_gaussians: {preprocess_time:.4f} seconds")
     
 
-def test_batched_gaussian_rasterizer():
-    # Set up the input data
-    num_gaussians = 10000
-    
-   
+def test_batched_gaussian_rasterizer():       
     # Set up the viewpoint cameras
     batched_viewpoint_cameras = []
     for _ in range(num_batches):
@@ -172,10 +169,10 @@ def test_batched_gaussian_rasterizer():
     # Perform further operations with the batched results
     # Test results and performance
    
-    return torch.stack(batched_means2D,dim=0).clone().cpu()
+    return batched_means2D
     
     
-def test_batched_gaussian_rasterizer_batch_processing(orig_means2D):
+def test_batched_gaussian_rasterizer_batch_processing():
     # Set up the input data
     start_time = time.time()
     # Set up the viewpoint cameras
@@ -257,18 +254,18 @@ def test_batched_gaussian_rasterizer_batch_processing(orig_means2D):
     assert batched_radii.shape == (num_batches, num_gaussians)
     assert batched_depths.shape == (num_batches, num_gaussians)
     torch.cuda.empty_cache()
-    new_batched_means2D=batched_means2D.clone().cpu()
-   
-    equal_elements = torch.eq(orig_means2D, new_batched_means2D)
-    all_equal = torch.all(equal_elements)
-    print(all_equal)
-
-    assert(all_equal==True)#means2d
-
-
+    
+    return batched_means2D
 
 
 if __name__ == "__main__":
-    means2D=test_batched_gaussian_rasterizer()
-    test_batched_gaussian_rasterizer_batch_processing(means2D)
+    batched_means2D=test_batched_gaussian_rasterizer()
+    batched_means2D_batch_processed = test_batched_gaussian_rasterizer_batch_processing()
+    
+    equal_elements = torch.eq(batched_means2D, batched_means2D_batch_processed)
+    all_equal = torch.all(equal_elements)
+    print(all_equal)
+
+    assert(all_equal is True)#means2d
+
     
