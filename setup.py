@@ -9,9 +9,11 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
-from setuptools import setup
-from torch.utils.cpp_extension import CUDAExtension, BuildExtension
 import os
+
+from setuptools import setup
+from torch.utils.cpp_extension import BuildExtension, CUDAExtension
+
 os.path.dirname(os.path.abspath(__file__))
 
 setup(
@@ -30,7 +32,7 @@ setup(
             headers=[
                 "config.h"
             ],
-            extra_compile_args={"nvcc": ["-I" + os.path.join(os.path.dirname(os.path.abspath(__file__)), "third_party/glm/")]})
+            extra_compile_args={"nvcc": ["-g", "-I" + os.path.join(os.path.dirname(os.path.abspath(__file__)), "third_party/glm/")]})
         ],
     cmdclass={
         'build_ext': BuildExtension
