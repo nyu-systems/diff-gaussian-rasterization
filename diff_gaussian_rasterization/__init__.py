@@ -81,8 +81,10 @@ class _PreprocessGaussians(torch.autograd.Function):
 
         # TODO: update this. 
         if not torch.is_tensor(raster_settings.tanfovx):
+            print("normal batch calling")
             num_rendered, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped = _C.preprocess_gaussians(*args)
         else:
+            print("improved batch calling")
             num_rendered, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped = _C.preprocess_gaussians_batched(*args)
 
         # Keep relevant tensors for backward
