@@ -80,8 +80,7 @@ class _PreprocessGaussians(torch.autograd.Function):
         )
 
         # TODO: update this. 
-        batch_size = raster_settings.tanfovx.shape[0] if torch.is_tensor(raster_settings.tanfovx) else 1
-        if batch_size == 1:
+        if not torch.is_tensor(raster_settings.tanfovx):
             num_rendered, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped = _C.preprocess_gaussians(*args)
         else:
             num_rendered, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped = _C.preprocess_gaussians_batched(*args)
