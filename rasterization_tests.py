@@ -169,7 +169,7 @@ def test_batched_gaussian_rasterizer():
     # Perform further operations with the batched results
     # Test results and performance
    
-    return batched_means2D
+    return torch.stack(batched_means2D, dim=0)
     
     
 def test_batched_gaussian_rasterizer_batch_processing():
