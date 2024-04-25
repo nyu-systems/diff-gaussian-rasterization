@@ -169,7 +169,10 @@ def test_batched_gaussian_rasterizer():
     # Perform further operations with the batched results
     # Test results and performance
    
-    return torch.stack(batched_means2D, dim=0)
+    batched_means2D = torch.stack(batched_means2D, dim=0)
+    batched_radii = torch.stack(batched_radii, dim=0)
+    
+    return batched_means2D, batched_radii, batched_screenspace_params
     
     
 def test_batched_gaussian_rasterizer_batch_processing():
@@ -255,15 +258,33 @@ def test_batched_gaussian_rasterizer_batch_processing():
     assert batched_depths.shape == (num_batches, num_gaussians)
     torch.cuda.empty_cache()
     
-    return batched_means2D
+    batched_screenspace_params = []
+    for i in range(num_batches):
+        means2D = batched_means2D[i]
+        rgb = batched_rgb[i]
+        conic_opacity = batched_conic_opacity[i]
+        radii = batched_radii[i]
+        depths = batched_depths[i]
+        
+        screenspace_params = [means2D, rgb, conic_opacity, radii, depths]
+        batched_screenspace_params.append(screenspace_params)
+    
+    return batched_means2D, batched_radii, batched_screenspace_params
 
+
+def assert_tensor_equal(tensor1, tensor2):
+    return torch.all(torch.eq(tensor1, tensor2))
 
 if __name__ == "__main__":
-    batched_means2D=test_batched_gaussian_rasterizer()
-    batched_means2D_batch_processed = test_batched_gaussian_rasterizer_batch_processing()
-    
-    equal_elements = torch.eq(batched_means2D, batched_means2D_batch_processed)
-
-    assert torch.all(equal_elements)
+    batched_means2D, batched_radii, batched_screenspace_params = test_batched_gaussian_rasterizer()
+    batched_means2D_batch_processed, batched_radii_batch_processed, batched_screenspace_params_batch_processed = test_batched_gaussian_rasterizer_batch_processing()
+        
+    assert assert_tensor_equal(batched_means2D, batched_means2D_batch_processed)
+    assert assert_tensor_equal(batched_radii, batched_radii_batch_processed)
+    assert len(batched_screenspace_params) == len(batched_screenspace_params_batch_processed)
+    for i in range(len(batched_screenspace_params)):
+        assert len(batched_screenspace_params[i]) == len(batched_screenspace_params_batch_processed[i])
+        for j in range(len(batched_screenspace_params[i])):
+            assert assert_tensor_equal(batched_screenspace_params[i][j], batched_screenspace_params_batch_processed[i][j])
 
     
