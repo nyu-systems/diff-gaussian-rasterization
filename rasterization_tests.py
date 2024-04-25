@@ -263,9 +263,7 @@ if __name__ == "__main__":
     batched_means2D_batch_processed = test_batched_gaussian_rasterizer_batch_processing()
     
     equal_elements = torch.eq(batched_means2D, batched_means2D_batch_processed)
-    all_equal = torch.all(equal_elements)
-    print(all_equal)
 
-    assert(all_equal is True)#means2d
+    assert torch.all(equal_elements)
 
     
