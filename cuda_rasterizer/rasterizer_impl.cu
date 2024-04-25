@@ -444,7 +444,7 @@ int CudaRasterizer::Rasterizer::preprocessForwardBatches(
 	const float* viewmatrix,
 	const float* projmatrix,
 	const float* cam_pos,
-	const float* tan_fovx, float* tan_fovy,
+	const float* tan_fovx, const float* tan_fovy,
 	const bool prefiltered,
     const int num_viewpoints,
 	bool debug,//raster_settings
