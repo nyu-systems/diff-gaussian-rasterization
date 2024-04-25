@@ -340,16 +340,22 @@ __global__ void L1LossCUDA(
     dL_dimage[c * height * width + row * width + idx] = grad;
   }
   __syncthreads();
-  
-  // Row-wise reduction.
-  float sum = 0;
+
+  // Row-wise parallel reduction.
+  unsigned int prev_s = width;
+  for (unsigned int s = (width + 1) >> 1; s > 1; s = (s + 1) >> 1)
+  {
+    if (idx < s && idx + s < prev_s)
+    {
+      Row[idx] += Row[idx + s];
+    }
+    prev_s = s;
+    __syncthreads();
+  }
+
   if (idx == 0)
   {
-    for (int i = 0; i < width; i++)
-    {
-      sum += Row[i];
-    }
-    output[c * height + row] = sum;
+    output[c * height + row] = Row[0] + Row[1];
   }
 }
 
