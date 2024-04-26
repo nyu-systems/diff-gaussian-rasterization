@@ -616,7 +616,8 @@ void FORWARD::preprocess_batch(int P, int D, int M,
 	bool prefiltered,
     const int num_viewpoints)
 {
-    preprocessCUDABatched<NUM_CHANNELS><<<grid, ONE_DIM_BLOCK_SIZE>>>(
+    dim3 tile_grid(cdiv(P, ONE_DIM_BLOCK_SIZE), num_viewpoints);
+    preprocessCUDABatched<NUM_CHANNELS><<<tile_grid, ONE_DIM_BLOCK_SIZE>>>(
 		P, D, M,
 		means3D,
 		scales,
