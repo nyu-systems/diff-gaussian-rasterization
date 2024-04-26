@@ -290,15 +290,14 @@ def compare_tensors(tensor1, tensor2):
 
     equality_matrix = torch.eq(tensor1, tensor2)
     if torch.all(equality_matrix):
-        print("All values in the tensors are equal.")
         return True
     else:
         print("Tensors have non-matching values.")
         non_matching_indices = torch.where(equality_matrix == False)
-        for idx in zip(*non_matching_indices):
+        for idx in zip(*non_matching_indices)[:5]:
             value1 = tensor1[idx].item()
             value2 = tensor2[idx].item()
-            # print(f"Non-matching values at index {idx}: {value1} != {value2}")
+            print(f"Non-matching values at index {idx}: {value1} != {value2}")
         return False
 
 if __name__ == "__main__":
