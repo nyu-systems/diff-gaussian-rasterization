@@ -513,12 +513,12 @@ __global__ void preprocessCUDABatched(
     float* rgb, float4* conic_opacity, const dim3 grid, uint32_t* tiles_touched,
     bool prefiltered, const int num_viewpoints)
 {
-    auto point_idx = cg::this_grid().thread_rank();
+    auto point_idx = blockIdx.x * blockDim.x + threadIdx.x;
     auto viewpoint_idx = blockIdx.y;
 
     if (viewpoint_idx >= num_viewpoints || point_idx >= P) return;
 
-    auto idx = viewpoint_idx * P + point_idx;
+    auto idx = viewpoint_idx * num_viewpoints + point_idx;
     const float* viewmatrix = viewmatrix_arr + viewpoint_idx * 16;
     const float* projmatrix = projmatrix_arr + viewpoint_idx * 16;
 
