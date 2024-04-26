@@ -294,7 +294,7 @@ def compare_tensors(tensor1, tensor2):
     else:
         print("Tensors have non-matching values.")
         non_matching_indices = torch.where(equality_matrix == False)
-        for idx in zip(*non_matching_indices)[:5]:
+        for idx in zip(*non_matching_indices[:5]):
             value1 = tensor1[idx].item()
             value2 = tensor2[idx].item()
             print(f"Non-matching values at index {idx}: {value1} != {value2}")
@@ -307,7 +307,6 @@ if __name__ == "__main__":
     assert compare_tensors(batched_means2D, batched_means2D_batch_processed)
     assert compare_tensors(batched_radii, batched_radii_batch_processed)
     assert compare_tensors(batched_conic_opacity, batched_conic_opacity_batch_processed)
-    print(batched_rgb.shape,batched_rgb_batch_processed.shape)
     print(batched_rgb)
     print('*****')
     print(batched_rgb_batch_processed)
@@ -315,10 +314,4 @@ if __name__ == "__main__":
     assert compare_tensors(batched_rgb, batched_rgb_batch_processed)
     assert compare_tensors(batched_depths, batched_depths_batch_processed)
     assert len(batched_screenspace_params) == len(batched_screenspace_params_batch_processed)
-    # for i in range(len(batched_screenspace_params)):
-    #     assert len(batched_screenspace_params[i]) == len(batched_screenspace_params_batch_processed[i])
-    #     for j in range(len(batched_screenspace_params[i])):
-    #         print(i,j)
-    #         assert compare_tensors(batched_screenspace_params[i][j], batched_screenspace_params_batch_processed[i][j])
-
     
