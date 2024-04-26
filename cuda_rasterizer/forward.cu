@@ -529,10 +529,10 @@ __global__ void preprocessCUDABatched(
 
     // Perform near culling, quit if outside.
     float3 p_view;
-    if (!in_frustum(idx, orig_points, viewmatrix, projmatrix, prefiltered, p_view)) return;
+    if (!in_frustum(point_idx, orig_points, viewmatrix, projmatrix, prefiltered, p_view)) return;
 
     // Transform point by projecting
-    float3 p_orig = { orig_points[3 * idx], orig_points[3 * idx + 1], orig_points[3 * idx + 2] };
+    float3 p_orig = { orig_points[3 * point_idx], orig_points[3 * point_idx + 1], orig_points[3 * point_idx + 2] };
     float4 p_hom = transformPoint4x4(p_orig, projmatrix);
     float p_w = 1.0f / (p_hom.w + 0.0000001f);
     float3 p_proj = { p_hom.x * p_w, p_hom.y * p_w, p_hom.z * p_w };
@@ -543,7 +543,7 @@ __global__ void preprocessCUDABatched(
     if (cov3D_precomp != nullptr) {
         cov3D = cov3D_precomp + idx * 6;
     } else {
-        computeCov3D(scales[idx], scale_modifier, rotations[idx], cov3Ds + idx * 6);
+        computeCov3D(scales[point_idx], scale_modifier, rotations[point_idx], cov3Ds + idx * 6);
         cov3D = cov3Ds + idx * 6;
     }
 
@@ -574,7 +574,7 @@ __global__ void preprocessCUDABatched(
     // If colors have been precomputed, use them, otherwise convert
     // spherical harmonics coefficients to RGB color.
     if (colors_precomp == nullptr) {
-        glm::vec3 result = computeColorFromSH(idx, D, M, (glm::vec3*)orig_points, cam_pos[viewpoint_idx], shs, clamped + idx * 3);
+        glm::vec3 result = computeColorFromSH(point_idx, D, M, (glm::vec3*)orig_points, cam_pos[viewpoint_idx], shs, clamped + idx * 3);
         rgb[idx * C + 0] = result.x;
         rgb[idx * C + 1] = result.y;
         rgb[idx * C + 2] = result.z;
@@ -586,7 +586,7 @@ __global__ void preprocessCUDABatched(
     points_xy_image[idx] = point_image;
 
     // Inverse 2D covariance and opacity neatly pack into one float4
-    conic_opacity[idx] = { conic.x, conic.y, conic.z, opacities[idx] };
+    conic_opacity[idx] = { conic.x, conic.y, conic.z, opacities[point_idx] };
     tiles_touched[idx] = (rect_max.y - rect_min.y) * (rect_max.x - rect_min.x);
 }
 
