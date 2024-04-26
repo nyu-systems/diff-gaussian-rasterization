@@ -518,7 +518,7 @@ __global__ void preprocessCUDABatched(
 
     if (viewpoint_idx >= num_viewpoints || point_idx >= P) return;
 
-    auto idx = viewpoint_idx * num_viewpoints + point_idx;
+    auto idx = viewpoint_idx * P + point_idx;
     const float* viewmatrix = viewmatrix_arr + viewpoint_idx * 16;
     const float* projmatrix = projmatrix_arr + viewpoint_idx * 16;
 
