@@ -464,7 +464,9 @@ int CudaRasterizer::Rasterizer::preprocessForwardBatches(
 
 	//CONVERT ALL VECTORS TO FLOATSSSSSS PRAPTIIIIIII
 
-    dim3 tile_grid(cdiv(P, ONE_DIM_BLOCK_SIZE), num_viewpoints);
+    dim3 tile_grid((width + BLOCK_X - 1) / BLOCK_X, (height + BLOCK_Y - 1) / BLOCK_Y, 1);
+	dim3 block(BLOCK_X, BLOCK_Y, 1);
+	int tile_num = tile_grid.x * tile_grid.y;
 
 	// allocate temporary buffer for tiles_touched.
 	// In sep_rendering==True case, we will compute tiles_touched in the renderForward. 
