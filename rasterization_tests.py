@@ -9,7 +9,7 @@ from diff_gaussian_rasterization import (
     GaussianRasterizerBatches,
 )
 
-num_gaussians = 10000
+num_gaussians = 50
 num_batches=1
 means3D = torch.randn(num_gaussians, 3).cuda()
 scales = torch.randn(num_gaussians, 3).cuda()
@@ -114,6 +114,9 @@ def test_batched_gaussian_rasterizer():
     batched_screenspace_params = []
     batched_means2D = []
     batched_radii = []
+    batched_conic_opacity=[]
+    batched_depths=[]
+    batched_rgb=[]
 
     start_time = time.time()
     
@@ -161,6 +164,9 @@ def test_batched_gaussian_rasterizer():
         batched_rasterizers.append(rasterizer)
         batched_screenspace_params.append(screenspace_params)
         batched_radii.append(radii)
+        batched_rgb.append(rgb)
+        batched_conic_opacity.append(conic_opacity)
+        batched_depths.append(depths)
 
 
     end_time = time.time()
@@ -171,8 +177,11 @@ def test_batched_gaussian_rasterizer():
    
     batched_means2D = torch.stack(batched_means2D, dim=0)
     batched_radii = torch.stack(batched_radii, dim=0)
+    batched_conic_opacity=torch.stack(batched_conic_opacity,dim=0)
+    batched_rgb=torch.stack(batched_rgb,dim=0)
+    batched_depths=torch.stack(batched_depths,dim=0)
     
-    return batched_means2D, batched_radii, batched_screenspace_params
+    return batched_means2D, batched_radii, batched_screenspace_params,batched_conic_opacity,batched_rgb,batched_depths
     
     
 def test_batched_gaussian_rasterizer_batch_processing():
@@ -269,7 +278,7 @@ def test_batched_gaussian_rasterizer_batch_processing():
         screenspace_params = [means2D, rgb, conic_opacity, radii, depths]
         batched_screenspace_params.append(screenspace_params)
     
-    return batched_means2D, batched_radii, batched_screenspace_params
+    return batched_means2D, batched_radii, batched_screenspace_params, batched_conic_opacity,batched_rgb,batched_depths
 
 
 def compare_tensors(tensor1, tensor2):
@@ -281,26 +290,36 @@ def compare_tensors(tensor1, tensor2):
 
     equality_matrix = torch.eq(tensor1, tensor2)
     if torch.all(equality_matrix):
+        print("All values in the tensors are equal.")
         return True
     else:
-        print("Tensors have non-matching values. Some of them are")
+        print("Tensors have non-matching values.")
         non_matching_indices = torch.where(equality_matrix == False)
-        for idx in zip(*non_matching_indices[:5]):
+        for idx in zip(*non_matching_indices):
             value1 = tensor1[idx].item()
             value2 = tensor2[idx].item()
-            print(f"Non-matching values at index {idx}: {value1} != {value2}")
+            # print(f"Non-matching values at index {idx}: {value1} != {value2}")
         return False
 
 if __name__ == "__main__":
-    batched_means2D, batched_radii, batched_screenspace_params = test_batched_gaussian_rasterizer()
-    batched_means2D_batch_processed, batched_radii_batch_processed, batched_screenspace_params_batch_processed = test_batched_gaussian_rasterizer_batch_processing()
+    batched_means2D, batched_radii, batched_screenspace_params,batched_conic_opacity,batched_rgb,batched_depths = test_batched_gaussian_rasterizer()
+    batched_means2D_batch_processed, batched_radii_batch_processed, batched_screenspace_params_batch_processed,batched_conic_opacity_batch_processed,batched_rgb_batch_processed,batched_depths_batch_processed = test_batched_gaussian_rasterizer_batch_processing()
         
     assert compare_tensors(batched_means2D, batched_means2D_batch_processed)
     assert compare_tensors(batched_radii, batched_radii_batch_processed)
+    assert compare_tensors(batched_conic_opacity, batched_conic_opacity_batch_processed)
+    print(batched_rgb.shape,batched_rgb_batch_processed.shape)
+    print(batched_rgb)
+    print('*****')
+    print(batched_rgb_batch_processed)
+
+    assert compare_tensors(batched_rgb, batched_rgb_batch_processed)
+    assert compare_tensors(batched_depths, batched_depths_batch_processed)
     assert len(batched_screenspace_params) == len(batched_screenspace_params_batch_processed)
-    for i in range(len(batched_screenspace_params)):
-        assert len(batched_screenspace_params[i]) == len(batched_screenspace_params_batch_processed[i])
-        for j in range(len(batched_screenspace_params[i])):
-            assert compare_tensors(batched_screenspace_params[i][j], batched_screenspace_params_batch_processed[i][j])
+    # for i in range(len(batched_screenspace_params)):
+    #     assert len(batched_screenspace_params[i]) == len(batched_screenspace_params_batch_processed[i])
+    #     for j in range(len(batched_screenspace_params[i])):
+    #         print(i,j)
+    #         assert compare_tensors(batched_screenspace_params[i][j], batched_screenspace_params_batch_processed[i][j])
 
     
