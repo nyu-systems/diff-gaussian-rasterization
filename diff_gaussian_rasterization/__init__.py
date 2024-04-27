@@ -45,6 +45,9 @@ def preprocess_gaussians(
         cuda_args
     )
 
+def preprocess_gaussians_back(grad_means2D, grad_rgb, grad_conic_opacity, grad_radii, grad_depths):
+    return _PreprocessGaussians.backward(None,grad_means2D, grad_rgb, grad_conic_opacity, grad_radii, grad_depths)
+
 class _PreprocessGaussians(torch.autograd.Function):
     @staticmethod
     def forward(
@@ -113,8 +116,16 @@ class _PreprocessGaussians(torch.autograd.Function):
 
         # change dL_dmeans2D from (P, 2) to (P, 3)
         # grad_means2D is (P, 2) now. Need to pad it to (P, 3) because preprocess_gaussians_backward's cuda implementation.
-        grad_means2D_pad = torch.zeros((grad_means2D.shape[0], 1), dtype = grad_means2D.dtype, device = grad_means2D.device)
-        grad_means2D = torch.cat((grad_means2D, grad_means2D_pad), dim = 1).contiguous()
+       
+        if not torch.is_tensor(raster_settings.tanfovx):
+            print(grad_means2D.shape)
+            grad_means2D_pad = torch.zeros((grad_means2D.shape[0], 1), dtype = grad_means2D.dtype, device = grad_means2D.device)
+            grad_means2D = torch.cat((grad_means2D, grad_means2D_pad), dim = 1).contiguous()
+        else:
+            print(grad_means2D.shape)
+            grad_means2D_pad = torch.zeros((grad_means2D.shape[0],grad_means2D.shape[1], 1), dtype = grad_means2D.dtype, device = grad_means2D.device)
+            grad_means2D = torch.cat((grad_means2D, grad_means2D_pad), dim = 2).contiguous()
+
 
         # Restructure args as C++ method expects them
         args = (radii,
@@ -340,6 +351,9 @@ class GaussianRasterizerBatches(nn.Module):
                 opacities,
                 self.raster_settings_list,
                 batched_cuda_args)
+
+    def preprocess_gaussians_back(self,grad_means2D, grad_rgb, grad_conic_opacity, grad_radii, grad_depths):
+        return preprocess_gaussians_back(grad_means2D, grad_rgb, grad_conic_opacity, grad_radii, grad_depths)
 
 class GaussianRasterizer(nn.Module):
     def __init__(self, raster_settings):
