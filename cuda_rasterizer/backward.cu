@@ -908,6 +908,7 @@ void BACKWARD::preprocess_batch(
 	const float* cov3Ds,
 	const float* viewmatrix,
 	const float* projmatrix,
+	const float focal_x, const float focal_y,
 	const float* tan_fovx, const float* tan_fovy,
 	const glm::vec3* campos,
 	const float3* dL_dmean2D,
