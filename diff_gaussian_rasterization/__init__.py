@@ -15,7 +15,7 @@ import torch
 from . import _C
 import time
 
-from utils.loss_utils import pixelwise_ssim_with_mask
+from utils.loss_utils import pixelwise_ssim_with_mask, gaussian, create_window
 
 def cpu_deep_copy_tuple(input_tuple):
     copied_tensors = [item.cpu().clone() if isinstance(item, torch.Tensor) else item for item in input_tuple]
@@ -312,16 +312,42 @@ def fused_loss(
   mask, 
   lambda_dssim=0.2
 ):
-  return _FusedLoss.apply(image, gt_image, mask, lambda_dssim)
+    window_size=11
+    channel = image.size(-3)
+    window = create_window(window_size, channel)
+    if image.is_cuda:
+        window = window.cuda(image.get_device())
+    window = window.type_as(image)
+    mu1 = F.conv2d(image, window, padding=window_size // 2, groups=channel)
+    mu2 = F.conv2d(gt_image, window, padding=window_size // 2, groups=channel)
+
+    mu1_sq = mu1.pow(2)
+    mu2_sq = mu2.pow(2)
+    mu1_mu2 = mu1 * mu2
+
+    sigma1_sq = F.conv2d(image * image, window, padding=window_size // 2, groups=channel) - mu1_sq
+    sigma2_sq = F.conv2d(gt_image * gt_image, window, padding=window_size // 2, groups=channel) - mu2_sq
+    sigma12 = F.conv2d(image * gt_image, window, padding=window_size // 2, groups=channel) - mu1_mu2
+
+    C1 = 0.01 ** 2
+    C2 = 0.03 ** 2
+    
+    return _FusedLoss.apply(image, gt_image, mask, lambda_dssim, mu1_sq, mu2_sq, mu1_mu2, sigma1_sq, sigma2_sq, sigma12)
 
 class _FusedLoss(torch.autograd.Function):
   @staticmethod
-  def forward(ctx, image, gt_image, mask, lambda_dssim):
+  def forward(ctx, image, gt_image, mask, lambda_dssim, mu1_sq, mu2_sq, mu1_mu2, sigma1_sq, sigma2_sq, sigma12):
     args = (
       image,
       gt_image,
       mask,
-      lambda_dssim
+      lambda_dssim,
+      mu1_sq,
+      mu2_sq,
+      mu1_mu2,
+      sigma1_sq,
+      sigma2_sq,
+      sigma12
     )
     
     l1_loss, dl1_dimage = _C.fused_l1_loss(*args) # loss: return float or tensor?
