@@ -165,7 +165,6 @@ def test_batched_gaussian_rasterizer():
         # TODO: make the below work
         # if mode == "train":
         #     means2D.retain_grad()
-
         batched_means2D.append(means2D)
         screenspace_params = [means2D, rgb, conic_opacity, radii, depths]
         batched_rasterizers.append(rasterizer)
@@ -190,18 +189,16 @@ def test_batched_gaussian_rasterizer():
 
 
     start_backward=time.time()
-    
-    d_means2d=batched_means2D.sum().backward()
+    target_batched_means2d=torch.ones(batched_means2D.shape).cuda()
+    batched_means2D.retain_grad()
+    loss = (batched_means2D - target_batched_means2d).pow(2).mean()
+    loss.backward()
     # print(batched_means2D.grad)
-    # dmeans2d=torch.ones_like(batched_means2D)
-    # batched_means2D.backward(dmeans2d)
-    # print(batched_means2D.grad)
-    # grads=rasterizer.preprocess_gaussians_back(grad_means2D, grad_rgb, grad_conic_opacity, grad_radii, grad_depths)
     end_backward=time.time()
     preproc_back=end_backward-start_backward
     print(f"Time taken by test_batched_gaussian_rasterizer BACKWARD: {preproc_back:.4f} seconds")
     
-    return batched_means2D, batched_radii, batched_screenspace_params,batched_conic_opacity,batched_rgb,batched_depths
+    return batched_means2D, batched_radii, batched_screenspace_params,batched_conic_opacity,batched_rgb,batched_depths,batched_means2D.grad
     
     
 def test_batched_gaussian_rasterizer_batch_processing():
@@ -300,13 +297,16 @@ def test_batched_gaussian_rasterizer_batch_processing():
         batched_screenspace_params.append(screenspace_params)
 
     start_backward=time.time()
-    d_means2d=batched_means2D.sum().backward()
-    # grads=rasterizer.preprocess_gaussians_back(batched_means2D, batched_rgb, batched_conic_opacity, batched_radii, batched_depths)
+    target_batched_means2d=torch.ones(batched_means2D.shape).cuda()
+    batched_means2D.retain_grad()
+    loss = (batched_means2D - target_batched_means2d).pow(2).mean()
+    loss.backward()
+    # print(batched_means2D.grad)
     end_backward=time.time()
     preproc_back=end_backward-start_backward
     print(f"Time taken by test_batched_gaussian_rasterizer_batch_processing BACKWARD: {preproc_back:.4f} seconds")
     
-    return batched_means2D, batched_radii, batched_screenspace_params, batched_conic_opacity,batched_rgb,batched_depths
+    return batched_means2D, batched_radii, batched_screenspace_params, batched_conic_opacity,batched_rgb,batched_depths,batched_means2D.grad
 
 
 def compare_tensors(tensor1, tensor2):
@@ -329,8 +329,8 @@ def compare_tensors(tensor1, tensor2):
         return False
 
 if __name__ == "__main__":
-    batched_means2D, batched_radii, batched_screenspace_params,batched_conic_opacity,batched_rgb,batched_depths = test_batched_gaussian_rasterizer()
-    batched_means2D_batch_processed, batched_radii_batch_processed, batched_screenspace_params_batch_processed,batched_conic_opacity_batch_processed,batched_rgb_batch_processed,batched_depths_batch_processed = test_batched_gaussian_rasterizer_batch_processing()
+    batched_means2D, batched_radii, batched_screenspace_params,batched_conic_opacity,batched_rgb,batched_depths,batched_dL_dmeans2D = test_batched_gaussian_rasterizer()
+    batched_means2D_batch_processed, batched_radii_batch_processed, batched_screenspace_params_batch_processed,batched_conic_opacity_batch_processed,batched_rgb_batch_processed,batched_depths_batch_processed,batched_dL_dmeans2D_batched_processed = test_batched_gaussian_rasterizer_batch_processing()
         
     assert compare_tensors(batched_means2D, batched_means2D_batch_processed)
     print(batched_means2D.shape)
