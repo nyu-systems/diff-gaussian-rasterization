@@ -311,6 +311,97 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
   return std::make_tuple(dL_dmeans3D, dL_dscales, dL_drotations, dL_dsh, dL_dopacity);
 }
 
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+PreprocessGaussiansBackwardCUDABatches(
+    const torch::Tensor &radii,
+    const torch::Tensor &cov3D,
+    const torch::Tensor &clamped, // the above are all per-Gaussian intemediate results.
+    const torch::Tensor &means3D,
+    const torch::Tensor &scales,
+    const torch::Tensor &rotations,
+    const torch::Tensor &sh, // input of this operator
+    const float scale_modifier,
+    const torch::Tensor &viewmatrix,
+    const torch::Tensor &projmatrix,
+    const torch::Tensor &tan_fovx,
+    const torch::Tensor &tan_fovy,
+    const int image_height,
+    const int image_width,
+    const int degree,
+    const torch::Tensor &campos, // rasterization setting.
+    const torch::Tensor &dL_dmeans2D,
+    const torch::Tensor &dL_dconic_opacity,
+    const torch::Tensor &dL_dcolors, // gradients of output of this operator
+    const int R,
+    const bool debug,
+    const pybind11::dict &args)
+{
+    const int P = means3D.size(0);
+    const int H = image_height;
+    const int W = image_width;
+    const int num_viewpoints = viewmatrix.size(0);
+    
+    int M = 0;
+    if(sh.size(0) != 0)
+    {	
+        M = sh.size(1);
+    }
+
+    torch::Tensor dL_dconic = torch::zeros({num_viewpoints, P, 2, 2}, means3D.options());
+    // set dL_dconic[..., 0, 0] = dL_dconic_opacity[..., 0]
+    dL_dconic.select(2, 0).select(2, 0).copy_(dL_dconic_opacity.select(2, 0));
+    // set dL_dconic[..., 0, 1] = dL_dconic_opacity[..., 1]
+    dL_dconic.select(2, 0).select(2, 1).copy_(dL_dconic_opacity.select(2, 1));
+    // set dL_dconic[..., 1, 1] = dL_dconic_opacity[..., 2]
+    dL_dconic.select(2, 1).select(2, 1).copy_(dL_dconic_opacity.select(2, 2));
+    dL_dconic = dL_dconic.contiguous();
+    //TODO: is this correct usage?
+
+    torch::Tensor dL_dopacity = torch::zeros({num_viewpoints, P, 1}, means3D.options());
+    // set dL_dopacity[..., 0] = dL_dconic_opacity[..., 3]
+    dL_dopacity.select(2, 0).copy_(dL_dconic_opacity.select(2, 3));
+    dL_dopacity = dL_dopacity.contiguous();
+
+    torch::Tensor dL_dmeans3D = torch::zeros({num_viewpoints, P, 3}, means3D.options());
+    torch::Tensor dL_dcov3D = torch::zeros({num_viewpoints, P, 6}, means3D.options());
+    //dL_dcov3D is itermidiate result to compute dL_drotations and dL_dscales, do not need to return to python.
+    torch::Tensor dL_dscales = torch::zeros({num_viewpoints, P, 3}, means3D.options());
+    torch::Tensor dL_drotations = torch::zeros({num_viewpoints, P, 4}, means3D.options());
+    torch::Tensor dL_dsh = torch::zeros({num_viewpoints, P, M, 3}, means3D.options());
+
+    if(P != 0)
+    {  
+        CudaRasterizer::Rasterizer::preprocessBackwardBatches(
+            num_viewpoints,
+            radii.contiguous().data<int>(),
+            cov3D.contiguous().data<float>(),
+            clamped.contiguous().data<bool>(),//the above are all per-Gaussian intermediate results.
+            P, degree, M, R,
+            W, H, //rasterization setting.
+            means3D.contiguous().data<float>(),
+            scales.data_ptr<float>(),
+            rotations.data_ptr<float>(),
+            sh.contiguous().data<float>(),//input of this operator
+            scale_modifier,
+            viewmatrix.contiguous().data<float>(),
+            projmatrix.contiguous().data<float>(),
+            campos.contiguous().data<float>(),
+			tan_fovx.contiguous().data<float>(),
+            tan_fovy.contiguous().data<float>(),,//rasterization setting.
+            dL_dmeans2D.contiguous().data<float>(),
+            dL_dconic.contiguous().data<float>(),
+            dL_dcolors.contiguous().data<float>(),//gradients of output of this operator
+            dL_dmeans3D.contiguous().data<float>(),
+            dL_dcov3D.contiguous().data<float>(),
+            dL_dscales.contiguous().data<float>(),
+            dL_drotations.contiguous().data<float>(),
+            dL_dsh.contiguous().data<float>(),//gradients of input of this operator
+            debug,
+            args);
+    }
+
+    return std::make_tuple(dL_dmeans3D, dL_dscales, dL_drotations, dL_dsh, dL_dopacity);  
+}
 
 ////////////////////// GetDistributionStrategy ////////////////////////
 

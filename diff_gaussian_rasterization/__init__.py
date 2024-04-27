@@ -140,7 +140,10 @@ class _PreprocessGaussians(torch.autograd.Function):
                 raster_settings.debug,
                 cuda_args)
 
-        dL_dmeans3D, dL_dscales, dL_drotations, dL_dsh, dL_dopacity = _C.preprocess_gaussians_backward(*args)
+        if not torch.is_tensor(raster_settings.tanfovx):
+            dL_dmeans3D, dL_dscales, dL_drotations, dL_dsh, dL_dopacity = _C.preprocess_gaussians_backward(*args)
+        else:
+            dL_dmeans3D, dL_dscales, dL_drotations, dL_dsh, dL_dopacity = _C.preprocess_gaussians_backward_batched(*args)
 
         grads = (
             dL_dmeans3D.contiguous(),
