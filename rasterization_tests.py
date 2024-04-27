@@ -13,8 +13,8 @@ num_gaussians = 50
 num_batches=1
 means3D = torch.randn(num_gaussians, 3).cuda()
 scales = torch.randn(num_gaussians, 3).cuda()
-rotations = torch.randn(num_gaussians, 3, 3).cuda()
-shs = torch.randn(num_gaussians, 9).cuda()
+rotations = torch.randn(num_gaussians,4).cuda()
+shs = torch.randn(num_gaussians, 16,3).cuda()
 opacity = torch.randn(num_gaussians, 1).cuda()
 
 def get_cuda_args(strategy, mode="train"):
