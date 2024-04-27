@@ -17,11 +17,7 @@ rotations = torch.randn(num_gaussians, 4).cuda()
 shs = torch.randn(num_gaussians, 16, 3).cuda()
 opacity = torch.randn(num_gaussians, 1).cuda()
 
-means3D.requires_grad = True
-scales.requires_grad = True
-rotations.requires_grad = True
-shs.requires_grad = True
-opacity.requires_grad = True
+
 
 def get_cuda_args(strategy, mode="train"):
     cuda_args = {
