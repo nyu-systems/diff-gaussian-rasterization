@@ -9,12 +9,12 @@ from diff_gaussian_rasterization import (
     GaussianRasterizerBatches,
 )
 
-num_gaussians = 50
-num_batches=1
+num_gaussians = 10000
+num_batches=32
 means3D = torch.randn(num_gaussians, 3).cuda()
 scales = torch.randn(num_gaussians, 3).cuda()
-rotations = torch.randn(num_gaussians, 3, 3).cuda()
-shs = torch.randn(num_gaussians, 9).cuda()
+rotations = torch.randn(num_gaussians, 4).cuda()
+shs = torch.randn(num_gaussians, 16, 3).cuda()
 opacity = torch.randn(num_gaussians, 1).cuda()
 
 def get_cuda_args(strategy, mode="train"):
@@ -104,7 +104,7 @@ def test_batched_gaussian_rasterizer():
     bg_color = torch.ones(3).cuda()
     scaling_modifier = 1.0
     pc = type('PC', (), {})
-    pc.active_sh_degree = 2
+    pc.active_sh_degree = 3
     pipe = type('Pipe', (), {})
     pipe.debug = False
     mode = "train"
@@ -207,7 +207,7 @@ def test_batched_gaussian_rasterizer_batch_processing():
     bg_color = torch.ones(3).cuda()
     scaling_modifier = 1.0
     pc = type('PC', (), {})
-    pc.active_sh_degree = 2
+    pc.active_sh_degree = 3
     pipe = type('Pipe', (), {})
     pipe.debug = False
     mode = "train"
@@ -265,7 +265,6 @@ def test_batched_gaussian_rasterizer_batch_processing():
     assert batched_conic_opacity.shape == (num_batches, num_gaussians,4)
     assert batched_radii.shape == (num_batches, num_gaussians)
     assert batched_depths.shape == (num_batches, num_gaussians)
-    torch.cuda.empty_cache()
     
     batched_screenspace_params = []
     for i in range(num_batches):
@@ -307,11 +306,9 @@ if __name__ == "__main__":
     assert compare_tensors(batched_means2D, batched_means2D_batch_processed)
     assert compare_tensors(batched_radii, batched_radii_batch_processed)
     assert compare_tensors(batched_conic_opacity, batched_conic_opacity_batch_processed)
-    print(batched_rgb)
-    print('*****')
-    print(batched_rgb_batch_processed)
 
     assert compare_tensors(batched_rgb, batched_rgb_batch_processed)
     assert compare_tensors(batched_depths, batched_depths_batch_processed)
     assert len(batched_screenspace_params) == len(batched_screenspace_params_batch_processed)
     
+

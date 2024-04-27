@@ -633,7 +633,7 @@ __global__ void preprocessCUDABatched(
 	
     if (colors_precomp == nullptr) {
 		
-        glm::vec3 result = computeColorFromSHBatched(point_idx,idx, D, M, (glm::vec3*)orig_points, cam_pos[viewpoint_idx], shs, clamped + idx * 3);
+        glm::vec3 result = computeColorFromSHBatched(point_idx,idx, D, M, (glm::vec3*)orig_points, cam_pos[viewpoint_idx], shs, clamped);
         rgb[idx * C + 0] = result.x;
         rgb[idx * C + 1] = result.y;
         rgb[idx * C + 2] = result.z;
