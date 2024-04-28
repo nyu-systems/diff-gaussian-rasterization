@@ -626,6 +626,7 @@ void CudaRasterizer::Rasterizer::preprocessBackwardBatches(
 		cov3D_ptr,
 		viewmatrix,
 		projmatrix,
+		width, height,
 		tan_fovx, tan_fovy,
 		(glm::vec3*)campos,
 		(float3*)dL_dmean2D,
