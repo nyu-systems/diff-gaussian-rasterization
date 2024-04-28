@@ -203,7 +203,7 @@ def test_batched_gaussian_rasterizer_batch_processing():
         rotations=rotations,
         shs=shs,
         opacities=opacity,
-        batched_cuda_args=batched_cuda_args
+        batched_cuda_args=batched_cuda_args[0]  #TODO: look into sending list of cuda_args/strategies
     )
     end_time = time.time()
     preprocess_time = end_time - start_time
