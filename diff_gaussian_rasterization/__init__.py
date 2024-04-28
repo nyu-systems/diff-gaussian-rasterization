@@ -59,6 +59,19 @@ class _PreprocessGaussians(torch.autograd.Function):
     ):
 
         # Restructure arguments the way that the C++ lib expects them
+        if isinstance(raster_settings, list):
+            rs = raster_settings[0]
+            rs.viewmatrix, rs.projmatrix, rs.campos = [
+                torch.stack(tensors) for tensors in zip(
+                    *[(rs.viewmatrix, rs.projmatrix, rs.campos) for rs in raster_settings]
+                )
+            ]
+            rs.tanfovx, rs.tanfovy = [
+                torch.tensor(vals, device=means3D.device)
+                for vals in zip(*[(rs.tanfovx, rs.tanfovy) for rs in raster_settings])
+            ]
+            raster_settings = rs
+            
         args = (
             means3D,
             scales,
@@ -317,15 +330,17 @@ class GaussianRasterizationSettings(NamedTuple):
     debug : bool
 
 class GaussianRasterizerBatches(nn.Module):
-    def __init__(self, raster_settings):
+    def __init__(self, raster_settings_batch):
         super().__init__()
-        self.raster_settings_list = raster_settings
+        self.raster_settings_batch = raster_settings_batch
 
     def markVisible(self, positions):
         # Mark visible points (based on frustum culling for camera) with a boolean 
         with torch.no_grad():
             visible = []
-            for viewmatrix, projmatrix in zip(self.raster_settings.viewmatrix, self.raster_settings.projmatrix):
+            for raster_settings in self.raster_settings_batch:
+                viewmatrix = raster_settings.viewmatrix
+                projmatrix = raster_settings.projmatrix
                 visible.append(_C.mark_visible(positions, viewmatrix, projmatrix))
         return visible
 
@@ -338,7 +353,7 @@ class GaussianRasterizerBatches(nn.Module):
                 rotations,
                 shs,
                 opacities,
-                self.raster_settings_list,
+                self.raster_settings_batch,
                 batched_cuda_args)
 
 class GaussianRasterizer(nn.Module):
