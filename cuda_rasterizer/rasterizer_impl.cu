@@ -610,8 +610,6 @@ void CudaRasterizer::Rasterizer::preprocessBackwardBatches(
 	auto [global_rank, world_size, iteration, log_interval, device, zhx_debug, zhx_time, mode, dist_division_mode, log_folder] = prepareArgs(args);
 
 	MyTimerOnGPU timer;
-	const float focal_y = height / (2.0f * tan_fovy[0]);//cureently hardcoded
-	const float focal_x = width / (2.0f * tan_fovx[0]);
 
 	const float* cov3D_ptr = cov3D;
 	timer.start("b20 preprocess");
@@ -628,7 +626,6 @@ void CudaRasterizer::Rasterizer::preprocessBackwardBatches(
 		cov3D_ptr,
 		viewmatrix,
 		projmatrix,
-		focal_x, focal_y,
 		tan_fovx, tan_fovy,
 		(glm::vec3*)campos,
 		(float3*)dL_dmean2D,
