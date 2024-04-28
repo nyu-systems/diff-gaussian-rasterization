@@ -115,8 +115,6 @@ class _PreprocessGaussians(torch.autograd.Function):
         # means2D = torch.cat((means2D, means2D_pad), dim = 1).contiguous()
         return means2D, rgb, conic_opacity, radii, depths
 
-
-
     @staticmethod # TODO: gradient for conic_opacity is tricky. because cuda render backward generate dL_dconic and dL_dopacity sperately. 
     def backward(ctx, grad_means2D, grad_rgb, grad_conic_opacity, grad_radii, grad_depths):
         # grad_radii, grad_depths should be all None. 
