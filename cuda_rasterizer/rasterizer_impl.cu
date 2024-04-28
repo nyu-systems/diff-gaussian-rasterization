@@ -370,36 +370,48 @@ __global__ void L1ReduceLossCUDA(
 }
 
 __global__ void SSIMLossCUDA(
-    float *mu1,
-    float *mu2,
-    float *sigma1_sq,
-    float *sigma2_sq,
-    float *sigma12,
+  float *mu1_tensor,
+  float *mu2_tensor,
+  float *sigma1_sq_tensor,
+  float *sigma2_sq_tensor,
+  float *sigma12_tensor,
 	bool *mask,
-    int channels,
-    int height,
-    int width,
-    float lambda_dssim,
-    float *SSIMoutput,
-    float *dL_dimage
-	
-) {
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
+  int channels,
+  int height,
+  int width,
+  float lambda_dssim,
+  float *SSIMoutput,
+  float *dL_dimage
+)
+{
+  int x = blockIdx.x * blockDim.x + threadIdx.x;
 	int y = blockIdx.y * blockDim.y + threadIdx.y;
 	int c = blockIdx.z;
 
-    const float C1 = 0.01 * 0.01;
-    const float C2 = 0.03 * 0.03;
-	printf("Entered SSIMloss CUDA Kernel! \n");
+  const float C1 = 0.01 * 0.01;
+  const float C2 = 0.03 * 0.03;
 
 	if (x < width && y < height && c < channels) {
-        int index = c * width * height + y * width + x;
-		float ssim = mask[y * width + x]*((2 * mu1[index]*mu2[index] + C1) * (2 * sigma12[index] + C2)) / 
-						((mu1[index]* mu1[index] + mu2[index]*mu2[index] + C1) * (sigma1_sq[index] + sigma2_sq[index] + C2));
+    int index = c * width * height + y * width + x;
+    float mu1_sq = mu1_tensor[index];
+    float mu2_sq = mu2_tensor[index];
+
+    float mu1_mu2 = mu1_sq * mu2_sq;
+    mu1_sq *= mu1_sq;
+    mu2_sq *= mu2_sq;
+
+    float sigma1_sq = sigma1_sq_tensor[index] - mu1_sq;
+    float sigma2_sq = sigma2_sq_tensor[index] - mu2_sq;
+    float sigma12 = sigma12_tensor[index] - mu1_mu2;
+
+    float ssim = 
+      ((2 * mu1_mu2 + C1) * (2 * sigma12 + C2)) / 
+      ((mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2));
+    
+    ssim *= mask[y * width + x];
+
 		SSIMoutput[index] = ssim;
     }
-
-	printf("End SSIMloss CUDA Kernel 2! \n");
 }
 
 
@@ -996,27 +1008,26 @@ void CudaRasterizer::Rasterizer::SSIMlossForward(
 )
 {
 	// SSIM loss.
-	printf("Entered SSIMlossForward! \n");
 	float *SSIMoutput;
 	cudaMalloc(&SSIMoutput, channels * height * width * sizeof(float));
 
 	dim3 dimBlock(16, 16); // Adjust block size as needed
-    dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, (height + dimBlock.y - 1) / dimBlock.y, channels);
+  dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, (height + dimBlock.y - 1) / dimBlock.y, channels);
 
-    SSIMLossCUDA<<<dimGrid, dimBlock>>>(
-        mu1,
+  SSIMLossCUDA<<<dimGrid, dimBlock>>>(
+    mu1,
 		mu2,
 		sigma1_sq,
 		sigma2_sq,
 		sigma12,
 		mask,
-        channels,
-        height,
-        width,
-        lambda_dssim,
+    channels,
+    height,
+    width,
+    lambda_dssim,
 		SSIMoutput,
 		dL_dimage
-    );
+  );
 
 	int num_items = channels * height * width;
 	void *d_temp_storage = NULL;
@@ -1027,6 +1038,4 @@ void CudaRasterizer::Rasterizer::SSIMlossForward(
 
 	cudaFree(d_temp_storage);
 	cudaFree(SSIMoutput);
-
-	printf("End SSIMlossForward! \n");
 }

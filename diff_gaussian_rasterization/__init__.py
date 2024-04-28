@@ -324,19 +324,15 @@ def fused_loss(
     mu1 = F.conv2d(image, window, padding=window_size // 2, groups=channel)
     mu2 = F.conv2d(gt_image, window, padding=window_size // 2, groups=channel)
 
-    mu1_sq = mu1.pow(2)
-    mu2_sq = mu2.pow(2)
-    mu1_mu2 = mu1 * mu2
-
-    sigma1_sq = F.conv2d(image * image, window, padding=window_size // 2, groups=channel) - mu1_sq
-    sigma2_sq = F.conv2d(gt_image * gt_image, window, padding=window_size // 2, groups=channel) - mu2_sq
-    sigma12 = F.conv2d(image * gt_image, window, padding=window_size // 2, groups=channel) - mu1_mu2
+    sigma1_sq = F.conv2d(image * image, window, padding=window_size // 2, groups=channel)
+    sigma2_sq = F.conv2d(gt_image * gt_image, window, padding=window_size // 2, groups=channel)
+    sigma12 = F.conv2d(image * gt_image, window, padding=window_size // 2, groups=channel)
     
-    return _FusedLoss.apply(image, gt_image, mask, lambda_dssim, mu1_sq, mu2_sq, mu1_mu2, sigma1_sq, sigma2_sq, sigma12)
+    return _FusedLoss.apply(image, gt_image, mask, lambda_dssim, mu1, mu2, sigma1_sq, sigma2_sq, sigma12)
 
 class _FusedLoss(torch.autograd.Function):
   @staticmethod
-  def forward(ctx, image, gt_image, mask, lambda_dssim, mu1_sq, mu2_sq, mu1_mu2, sigma1_sq, sigma2_sq, sigma12):
+  def forward(ctx, image, gt_image, mask, lambda_dssim, mu1, mu2, sigma1_sq, sigma2_sq, sigma12):
     args1 = (
       image,
       gt_image,
@@ -358,11 +354,11 @@ class _FusedLoss(torch.autograd.Function):
     # l1_loss = torch.tensor(l1_loss, device=image.device)
     
     # TODO: SSIM loss implementation.
-    SSIM_loss, dSSIM_dimage = _C.fused_SSIM_loss(*args2)
+    SSIM_loss, dSSIM_dimage = _C.fused_SSIM_loss_forward(*args2)
     #loss = l1_loss
     
     #ctx.save_for_backward(dl1_dimage)
-    ctx.save_for_backward(dSSIM_dimage,)
+    ctx.save_for_backward(dSSIM_dimage)
     
     #return loss
     return SSIM_loss
