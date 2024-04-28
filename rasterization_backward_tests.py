@@ -145,6 +145,12 @@ def test_batched_gaussian_rasterizer():
     preproc_back = end_backward - start_backward
     print(f"Time taken by test_batched_gaussian_rasterizer BACKWARD: {preproc_back:.4f} seconds")
 
+    assert means3D.grad is not None, "Means3D gradient is None."
+    assert scales.grad is not None, "Scales gradient is None."
+    assert rotations.grad is not None, "Rotations gradient is None."
+    assert shs.grad is not None, "SHs gradient is None."
+    assert opacity.grad is not None, "Opacity gradient is None."
+
     return (
         batched_means2D,
         batched_radii,
@@ -268,6 +274,12 @@ def test_batched_gaussian_rasterizer_batch_processing():
     preproc_back = end_backward - start_backward
     print(f"Time taken by test_batched_gaussian_rasterizer_batch_processing BACKWARD: {preproc_back:.4f} seconds")
 
+    assert means3D.grad is not None, "Means3D gradient is None."
+    assert scales.grad is not None, "Scales gradient is None."
+    assert rotations.grad is not None, "Rotations gradient is None."
+    assert shs.grad is not None, "SHs gradient is None."
+    assert opacity.grad is not None, "Opacity gradient is None."
+
     return (
         batched_means2D,
         batched_radii,
@@ -342,7 +354,9 @@ if __name__ == "__main__":
 
     assert compare_tensors(batched_rgb, batched_rgb_batch_processed), "RGB values do not match."
     assert compare_tensors(batched_depths, batched_depths_batch_processed), "Depths do not match."
-    assert len(batched_screenspace_params) == len(batched_screenspace_params_batch_processed), "Screenspace params do not match."
+    assert len(batched_screenspace_params) == len(
+        batched_screenspace_params_batch_processed
+    ), "Screenspace params do not match."
 
     # -------BACKWARD PASS-------
     assert compare_tensors(batched_dL_means3D, batched_dL_means3D_batch_processed), "dL_means3D do not match."
