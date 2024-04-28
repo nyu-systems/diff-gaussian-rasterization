@@ -333,14 +333,16 @@ def fused_loss(
 class _FusedLoss(torch.autograd.Function):
   @staticmethod
   def forward(ctx, image, gt_image, mask, lambda_dssim, mu1, mu2, sigma1_sq, sigma2_sq, sigma12):
-    args1 = (
+    args_l1 = (
       image,
       gt_image,
       mask,
       lambda_dssim
     )
     
-    args2 = (
+    l1_loss, dl1_dimage = _C.fused_l1_loss(*args_l1)
+    
+    args_ssim = (
       mask,
       lambda_dssim,
       mu1,
@@ -349,24 +351,19 @@ class _FusedLoss(torch.autograd.Function):
       sigma2_sq,
       sigma12
     )
+
+    SSIM_loss, dmu1, dmu2, dsigma1_sq, dsigma2_sq, dsigma12 = _C.fused_SSIM_loss(*args_ssim)
     
-    # l1_loss, dl1_dimage = _C.fused_l1_loss(*args1) # loss: return float or tensor? tensor
-    # l1_loss = torch.tensor(l1_loss, device=image.device)
+    loss =  (1.0 - lambda_dssim) * l1_loss + lambda_dssim * (1.0 - SSIM_loss)
+    ctx.save_for_backward(dl1_dimage, dmu1, dmu2, dsigma1_sq, dsigma2_sq, dsigma12)
     
-    # TODO: SSIM loss implementation.
-    SSIM_loss, dmu1, dmu2, dsigma1_sq, dsigma2_sq, dsigma12 = _C.fused_SSIM_loss(*args2)
-    #loss = l1_loss
-    #ctx.save_for_backward(dl1_dimage)
-    ctx.save_for_backward(dmu1, dmu2, dsigma1_sq, dsigma2_sq, dsigma12)
-    
-    #return loss
-    return SSIM_loss
+    return loss
   
   @staticmethod
   def backward(ctx, grad_loss):
-    (dmu1, dmu2, dsigma1_sq, dsigma2_sq, dsigma12) = ctx.saved_tensors
+    (dl1_dimage, dmu1, dmu2, dsigma1_sq, dsigma2_sq, dsigma12) = ctx.saved_tensors
 
-    #dL_dimage = dSSIM_dimage * grad_loss
+    dL_dimage = dl1_dimage * grad_loss
     dL_dmu1 = dmu1 * grad_loss
     dL_dmu2 = dmu2 * grad_loss
     dL_dsigma1_sq = dsigma1_sq * grad_loss
@@ -374,7 +371,7 @@ class _FusedLoss(torch.autograd.Function):
     dL_dsigma12 = dsigma12 * grad_loss
     
     grads = (
-      None,
+      dL_dimage,
       None,
       None,
       None,
@@ -385,7 +382,7 @@ class _FusedLoss(torch.autograd.Function):
       dL_dsigma12
     )
     
-    return grads    # need to align with input
+    return grads
 
 
 

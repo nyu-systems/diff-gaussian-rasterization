@@ -416,11 +416,11 @@ __global__ void SSIMLossCUDA(
       // ((2 * mu1_mu2 + C1) * (2 * sigma12 + C2)) / 
       // ((mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2));
 		SSIMoutput[index] = ssim * mask[y * width + x];
-    dmu1[index] = mask[y * width + x] * ((B * 2 * mu2) / (C * D) - (A * 2 * mu2) / (C * D) - (A * B * 2 * mu1) / (C * C * D) + (A * B * 2 * mu1) / (C * D * D));
-    dmu2[index] = mask[y * width + x] * ((B * 2 * mu1) / (C * D) - (A * 2 * mu1) / (C * D) - (A * B * 2 * mu2) / (C * C * D) + (A * B * 2 * mu2) / (C * D * D));
-    dsigma1_sq[index] = mask[y * width + x] * (-1) * (A * B) / (C * D * D);
-    dsigma2_sq[index] = mask[y * width + x] * (-1) * (A * B) / (C * D * D);
-    dsigma12[index] = mask[y * width + x] * (A * 2) / (C * D);
+    dmu1[index] = mask[y * width + x] * (-1) * lambda_dssim * ((B * 2 * mu2) / (C * D) - (A * 2 * mu2) / (C * D) - (A * B * 2 * mu1) / (C * C * D) + (A * B * 2 * mu1) / (C * D * D));
+    dmu2[index] = mask[y * width + x] * (-1) * lambda_dssim * ((B * 2 * mu1) / (C * D) - (A * 2 * mu1) / (C * D) - (A * B * 2 * mu2) / (C * C * D) + (A * B * 2 * mu2) / (C * D * D));
+    dsigma1_sq[index] = mask[y * width + x] * lambda_dssim * (A * B) / (C * D * D);
+    dsigma2_sq[index] = mask[y * width + x] * lambda_dssim * (A * B) / (C * D * D);
+    dsigma12[index] = mask[y * width + x] * (-1) * lambda_dssim * (A * 2) / (C * D);
   }
 }
 
