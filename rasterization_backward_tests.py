@@ -52,7 +52,20 @@ def setup_data():
     pipe.debug = False
     mode = "train"
 
-    return means3D, scales, rotations, shs, opacity, batched_viewpoint_cameras, batched_strategies, bg_color, scaling_modifier, pc, pipe, mode
+    return (
+        means3D,
+        scales,
+        rotations,
+        shs,
+        opacity,
+        batched_viewpoint_cameras,
+        batched_strategies,
+        bg_color,
+        scaling_modifier,
+        pc,
+        pipe,
+        mode,
+    )
 
 
 def compute_dummy_loss(means3D, scales, rotations, shs, opacity):
@@ -67,6 +80,7 @@ def zero_grad(means3D, scales, rotations, shs, opacity):
     rotations.grad = None
     shs.grad = None
     opacity.grad = None
+
 
 def get_cuda_args(strategy, mode="train"):
     cuda_args = {
@@ -89,7 +103,20 @@ def get_cuda_args(strategy, mode="train"):
 
 
 def run_batched_gaussian_rasterizer(setup_data):
-    means3D, scales, rotations, shs, opacity, batched_viewpoint_cameras, batched_strategies, bg_color, scaling_modifier, pc, pipe, mode = setup_data
+    (
+        means3D,
+        scales,
+        rotations,
+        shs,
+        opacity,
+        batched_viewpoint_cameras,
+        batched_strategies,
+        bg_color,
+        scaling_modifier,
+        pc,
+        pipe,
+        mode,
+    ) = setup_data
 
     batched_rasterizers = []
     batched_cuda_args = []
@@ -153,7 +180,7 @@ def run_batched_gaussian_rasterizer(setup_data):
 
     zero_grad(means3D, scales, rotations, shs, opacity)
     start_backward = time.time()
-    loss = compute_dummy_loss(means3D, scales, rotations, shs, opacity):
+    loss = compute_dummy_loss(means3D, scales, rotations, shs, opacity)
     loss.backward()
     end_backward = time.time()
     preproc_back = end_backward - start_backward
@@ -181,7 +208,20 @@ def run_batched_gaussian_rasterizer(setup_data):
 
 
 def run_batched_gaussian_rasterizer_batch_processing(setup_data):
-    means3D, scales, rotations, shs, opacity, batched_viewpoint_cameras, batched_strategies, bg_color, scaling_modifier, pc, pipe, mode = setup_data
+    (
+        means3D,
+        scales,
+        rotations,
+        shs,
+        opacity,
+        batched_viewpoint_cameras,
+        batched_strategies,
+        bg_color,
+        scaling_modifier,
+        pc,
+        pipe,
+        mode,
+    ) = setup_data
 
     # Set up the input data
     start_time = time.time()
@@ -255,7 +295,7 @@ def run_batched_gaussian_rasterizer_batch_processing(setup_data):
 
     zero_grad(means3D, scales, rotations, shs, opacity)
     start_backward = time.time()
-    loss = compute_dummy_loss(means3D, scales, rotations, shs, opacity):
+    loss = compute_dummy_loss(means3D, scales, rotations, shs, opacity)
     loss.backward()
     end_backward = time.time()
     preproc_back = end_backward - start_backward
@@ -351,4 +391,3 @@ def test_compare_batched_gaussian_rasterizer_results(setup_data):
     assert compare_tensors(batched_dL_rotations, batched_dL_rotations_batch_processed), "dL_rotations do not match."
     assert compare_tensors(batched_dL_shs, batched_dL_shs_batch_processed), "dL_shs do not match."
     assert compare_tensors(batched_dL_opacity, batched_dL_opacity_batch_processed), "dL_opacity do not match."
-    
