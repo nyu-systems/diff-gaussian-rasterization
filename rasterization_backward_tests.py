@@ -25,6 +25,20 @@ shs.requires_grad = True
 opacity.requires_grad = True
 
 
+def compute_dummy_loss():
+    losses = [(tensor - torch.ones_like(tensor)).pow(2).mean() for tensor in [means3D, scales, rotations, shs, opacity]]
+    loss = sum(losses)
+    return loss
+
+
+def zero_grad():
+    means3D.grad = None
+    scales.grad = None
+    rotations.grad = None
+    shs.grad = None
+    opacity.grad = None
+
+
 def get_cuda_args(strategy, mode="train"):
     cuda_args = {
         "mode": mode,
@@ -137,9 +151,9 @@ def test_batched_gaussian_rasterizer():
     batched_rgb = torch.stack(batched_rgb, dim=0)
     batched_depths = torch.stack(batched_depths, dim=0)
 
+    zero_grad()
     start_backward = time.time()
-    target_batched_means3d = torch.ones(means3D.shape).cuda()
-    loss = (means3D - target_batched_means3d).pow(2).mean()
+    loss = compute_dummy_loss()
     loss.backward()
     end_backward = time.time()
     preproc_back = end_backward - start_backward
@@ -158,11 +172,11 @@ def test_batched_gaussian_rasterizer():
         batched_conic_opacity,
         batched_rgb,
         batched_depths,
-        means3D.grad,
-        scales.grad,
-        rotations.grad,
-        shs.grad,
-        opacity.grad,
+        means3D.grad.clone(),
+        scales.grad.clone(),
+        rotations.grad.clone(),
+        shs.grad.clone(),
+        opacity.grad.clone(),
     )
 
 
@@ -265,10 +279,9 @@ def test_batched_gaussian_rasterizer_batch_processing():
         screenspace_params = [means2D, rgb, conic_opacity, radii, depths]
         batched_screenspace_params.append(screenspace_params)
 
+    zero_grad()
     start_backward = time.time()
-    means3D.grad.zero_()  # need to reset it for it to check
-    target_batched_means3d = torch.ones(means3D.shape).cuda()
-    loss = (means3D - target_batched_means3d).pow(2).mean()
+    loss = compute_dummy_loss()
     loss.backward()
     end_backward = time.time()
     preproc_back = end_backward - start_backward
@@ -287,11 +300,11 @@ def test_batched_gaussian_rasterizer_batch_processing():
         batched_conic_opacity,
         batched_rgb,
         batched_depths,
-        means3D.grad,
-        scales.grad,
-        rotations.grad,
-        shs.grad,
-        opacity.grad,
+        means3D.grad.clone(),
+        scales.grad.clone(),
+        rotations.grad.clone(),
+        shs.grad.clone(),
+        opacity.grad.clone(),
     )
 
 
