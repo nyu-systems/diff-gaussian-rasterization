@@ -116,7 +116,6 @@ namespace CudaRasterizer
 			bool debug,
 			const pybind11::dict &args);
 
-
 		static void preprocessBackwardBatches(
 			const int num_viewpoints,
 			const int* radii,

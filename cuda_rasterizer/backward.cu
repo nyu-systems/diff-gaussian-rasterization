@@ -317,6 +317,8 @@ __global__ void computeCov2DCUDABatched(
 	const float x_grad_mul = txtz < -limx || txtz > limx ? 0 : 1;
 	const float y_grad_mul = tytz < -limy || tytz > limy ? 0 : 1;
 
+    const float h_x = W / (2.0f * tan_fovx[viewpoint_idx]);
+    const float h_y = H / (2.0f * tan_fovy[viewpoint_idx]);
 	glm::mat3 J = glm::mat3(h_x / t.z, 0.0f, -(h_x * t.x) / (t.z * t.z),
 		0.0f, h_y / t.z, -(h_y * t.y) / (t.z * t.z),
 		0, 0, 0);
@@ -908,7 +910,6 @@ void BACKWARD::preprocess_batch(
 	const float* cov3Ds,
 	const float* viewmatrix,
 	const float* projmatrix,
-	const float focal_x, const float focal_y,
 	const float* tan_fovx, const float* tan_fovy,
 	const glm::vec3* campos,
 	const float3* dL_dmean2D,
@@ -932,8 +933,6 @@ void BACKWARD::preprocess_batch(
 		means3D,
 		radii,
 		cov3Ds,
-		focal_x,
-		focal_y,
 		tan_fovx,
 		tan_fovy,
 		viewmatrix,
