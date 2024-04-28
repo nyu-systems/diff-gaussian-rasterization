@@ -300,15 +300,15 @@ void save_log_in_file(int iteration, int local_rank, int world_size, std::string
 }
 
 __global__ void L1LossCUDA(
-  float *image,
-  float *gt_image,
-  bool *mask,
-  int channels,
-  int height,
-  int width,
-  float lambda_dssim,
-  float *output,
-  float *dL_dimage
+	float *image,
+	float *gt_image,
+	bool *mask,
+	int channels,
+	int height,
+	int width,
+	float lambda_dssim,
+	float *output,
+	float *dL_dimage
 )
 {
   int c = blockIdx.x;
@@ -370,70 +370,38 @@ __global__ void L1ReduceLossCUDA(
 }
 
 __global__ void SSIMLossCUDA(
-    float *image,
-    float *gt_image,
-    bool *mask,
+    float *mu1,
+    float *mu2,
+    float *sigma1_sq,
+    float *sigma2_sq,
+    float *sigma12,
+	bool *mask,
     int channels,
     int height,
     int width,
     float lambda_dssim,
-    float *mu1_sq,
-    float *mu2_sq,
-    float *mu1_mu2,
-    float *sigma1_sq,
-    float *sigma2_sq,
-    float *sigma12,
     float *SSIMoutput,
     float *dL_dimage
+	
 ) {
-    int c = blockIdx.x;
-    int row = blockIdx.y;
-    int idx = threadIdx.x;
-    int stride = blockDim.x;
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+	int c = blockIdx.z;
 
-    extern __shared__ float Row[];
+    const float C1 = 0.01 * 0.01;
+    const float C2 = 0.03 * 0.03;
+	printf("Entered SSIMloss CUDA Kernel! \n");
 
-    const float C1 = 0.01f * 0.01f;
-    const float C2 = 0.03f * 0.03f;
-
-    // Pixel-wise SSIM loss (forward and possibly backward).
-    for (int i = idx; i < width; i += stride) {
-        if (mask[row * width + i]) {
-            float mu1 = mu1_sq[c * height * width + row * width + i];
-            float mu2 = mu2_sq[c * height * width + row * width + i];
-            float sigma1 = sigma1_sq[c * height * width + row * width + i];
-            float sigma2 = sigma2_sq[c * height * width + row * width + i];
-            float sigma12_val = sigma12[c * height * width + row * width + i];
-
-            float ssim_numerator = (2.0f * mu1_mu2[c * height * width + row * width + i] + C1) * (2.0f * sigma12_val + C2);
-            float ssim_denominator = (mu1 + mu2 + C1) * (sigma1 + sigma2 + C2);
-            float ssim = ssim_numerator / ssim_denominator;
-
-            Row[i] = lambda_dssim * (1.0f - ssim);  // Compute SSIM loss
-
-            // Gradient computation if dL_dimage is needed
-            if (dL_dimage != nullptr) {
-                float grad = lambda_dssim * -2.0f * (gt_image[c * height * width + row * width + i] - image[c * height * width + row * width + i]) / ssim_denominator;
-                dL_dimage[c * height * width + row * width + i] = grad * mask[row * width + i];
-            }
-        } else {
-            Row[i] = 0;
-            if (dL_dimage != nullptr) {
-                dL_dimage[c * height * width + row * width + i] = 0;
-            }
-        }
+	if (x < width && y < height && c < channels) {
+        int index = c * width * height + y * width + x;
+		float ssim = mask[y * width + x]*((2 * mu1[index]*mu2[index] + C1) * (2 * sigma12[index] + C2)) / 
+						((mu1[index]* mu1[index] + mu2[index]*mu2[index] + C1) * (sigma1_sq[index] + sigma2_sq[index] + C2));
+		SSIMoutput[index] = ssim;
     }
-    __syncthreads();
 
-    // Row-wise reduction.
-    if (idx == 0) {
-        float sum = 0;
-        for (int i = 0; i < width; i++) {
-            sum += Row[i];
-        }
-        SSIMoutput[c * height + row] = sum;
-    }
+	printf("End SSIMloss CUDA Kernel 2! \n");
 }
+
 
 /////////////////////////////// Preprocess ///////////////////////////////
 
@@ -969,15 +937,15 @@ void CudaRasterizer::Rasterizer::renderBackward(
 
 //////////////////// Loss ////////////////////
 void CudaRasterizer::Rasterizer::l1lossForwardBackward(
-  float *image,
-  float *gt_image,
-  bool *mask,
-  int channels,
-  int height,
-  int width,
-  float lambda_dssim,
-  float *loss,
-  float *dL_dimage
+	float *image,
+	float *gt_image,
+	bool *mask,
+	int channels,
+	int height,
+	int width,
+	float lambda_dssim,
+	float *loss,
+	float *dL_dimage
 )
 {
   // L1 loss.
@@ -1012,9 +980,7 @@ void CudaRasterizer::Rasterizer::l1lossForwardBackward(
   cudaFree(l1output);
 }
 
-float CudaRasterizer::Rasterizer::SSIMlossForwardBackward(
-	float *image,
-	float *gt_image,
+void CudaRasterizer::Rasterizer::SSIMlossForward(
 	bool *mask,
 	int channels,
 	int height,
@@ -1022,52 +988,45 @@ float CudaRasterizer::Rasterizer::SSIMlossForwardBackward(
 	float lambda_dssim,
 	float *loss,
 	float *dL_dimage,
-	float *mu1_sq,
-	float *mu2_sq,
-	float *mu1_mu2,
+	float *mu1,
+	float *mu2,
 	float *sigma1_sq,
 	float *sigma2_sq,
 	float *sigma12
 )
 {
-	float C1 = 0.01 * 0.01;
-	float C2 = 0.03 * 0.03;
-
 	// SSIM loss.
+	printf("Entered SSIMlossForward! \n");
 	float *SSIMoutput;
-	cudaMalloc(&SSIMoutput, channels * height * sizeof(float));
+	cudaMalloc(&SSIMoutput, channels * height * width * sizeof(float));
 
-	int blockSize = std::min(width, 1024); // Try to cover a whole row with one block.
-	dim3 dimGrid(channels, height);
-	
+	dim3 dimBlock(16, 16); // Adjust block size as needed
+    dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, (height + dimBlock.y - 1) / dimBlock.y, channels);
 
-    SSIMLossCUDA<<<dimGrid, blockSize, width * sizeof(float)>>>(
-        image,
-        gt_image,
-        mask,
+    SSIMLossCUDA<<<dimGrid, dimBlock>>>(
+        mu1,
+		mu2,
+		sigma1_sq,
+		sigma2_sq,
+		sigma12,
+		mask,
         channels,
         height,
         width,
         lambda_dssim,
-        mu1_sq,
-    	mu2_sq,
-    	mu1_mu2,
-    	sigma1_sq,
-    	sigma2_sq,
-    	sigma12,
-    	SSIMoutput,
-    	dL_dimage
+		SSIMoutput,
+		dL_dimage
     );
-  
-	cudaDeviceSynchronize();
 
-	float LSSIM = 0;
-	for (int i = 0; i < channels * height; i++)
-	{
-		LSSIM += SSIMoutput[i];
-	}
+	int num_items = channels * height * width;
+	void *d_temp_storage = NULL;
+	size_t temp_storage_bytes = 0;
+	cub::DeviceReduce::Sum(d_temp_storage, temp_storage_bytes, SSIMoutput, loss, num_items);
+	cudaMalloc(&d_temp_storage, temp_storage_bytes);
+	cub::DeviceReduce::Sum(d_temp_storage, temp_storage_bytes, SSIMoutput, loss, num_items);
 
+	cudaFree(d_temp_storage);
 	cudaFree(SSIMoutput);
 
-    return LSSIM;
+	printf("End SSIMlossForward! \n");
 }

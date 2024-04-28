@@ -14,6 +14,9 @@ import torch.nn as nn
 import torch
 from . import _C
 import time
+import torch.nn.functional as F
+from torch.autograd import Variable
+from math import exp
 
 from utils.loss_utils import pixelwise_ssim_with_mask, gaussian, create_window
 
@@ -328,52 +331,62 @@ def fused_loss(
     sigma1_sq = F.conv2d(image * image, window, padding=window_size // 2, groups=channel) - mu1_sq
     sigma2_sq = F.conv2d(gt_image * gt_image, window, padding=window_size // 2, groups=channel) - mu2_sq
     sigma12 = F.conv2d(image * gt_image, window, padding=window_size // 2, groups=channel) - mu1_mu2
-
-    C1 = 0.01 ** 2
-    C2 = 0.03 ** 2
     
     return _FusedLoss.apply(image, gt_image, mask, lambda_dssim, mu1_sq, mu2_sq, mu1_mu2, sigma1_sq, sigma2_sq, sigma12)
 
 class _FusedLoss(torch.autograd.Function):
   @staticmethod
   def forward(ctx, image, gt_image, mask, lambda_dssim, mu1_sq, mu2_sq, mu1_mu2, sigma1_sq, sigma2_sq, sigma12):
-    args = (
+    args1 = (
       image,
       gt_image,
       mask,
+      lambda_dssim
+    )
+    
+    args2 = (
+      mask,
       lambda_dssim,
-      mu1_sq,
-      mu2_sq,
-      mu1_mu2,
+      mu1,
+      mu2,
       sigma1_sq,
       sigma2_sq,
       sigma12
     )
     
-    l1_loss, dl1_dimage = _C.fused_l1_loss(*args) # loss: return float or tensor?
+    # l1_loss, dl1_dimage = _C.fused_l1_loss(*args1) # loss: return float or tensor? tensor
     # l1_loss = torch.tensor(l1_loss, device=image.device)
     
     # TODO: SSIM loss implementation.
-    loss = l1_loss
+    SSIM_loss, dSSIM_dimage = _C.fused_SSIM_loss(*args2)
+    #loss = l1_loss
     
-    ctx.save_for_backward(dl1_dimage)
+    #ctx.save_for_backward(dl1_dimage)
+    ctx.save_for_backward(dSSIM_dimage,)
     
-    return loss
+    #return loss
+    return SSIM_loss
   
   @staticmethod
   def backward(ctx, grad_loss):
-    (dl1_dimage,) = ctx.saved_tensors
+    (dSSIM_dimage,) = ctx.saved_tensors
 
-    dL_dimage = dl1_dimage * grad_loss
+    #dL_dimage = dSSIM_dimage * grad_loss
+    dL_dimage = dSSIM_dimage * grad_loss
     
     grads = (
       dL_dimage.contiguous(),
       None,
       None,
+      None,
+      None,
+      None,
+      None,
+      None,
       None
     )
     
-    return grads
+    return grads    # need to align with input
 
 
 

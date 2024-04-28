@@ -175,14 +175,22 @@ FusedL1LossCUDA(
 );
 
 std::tuple<torch::Tensor, torch::Tensor>
-FusedSSIMLossCUDA(
-  torch::Tensor& image,
-  torch::Tensor& gt_image,
+FusedSSIMLossForwardCUDA(
   torch::Tensor& mask,
   float lambda_dssim,
-  torch::Tensor& mu1_sq,
-  torch::Tensor& mu2_sq,
-  torch::Tensor& mu1_mu2,
+  torch::Tensor& mu1,
+  torch::Tensor& mu2,
+  torch::Tensor& sigma1_sq,
+  torch::Tensor& sigma2_sq,
+  torch::Tensor& sigma12
+);
+
+std::tuple<torch::Tensor, torch::Tensor>
+FusedSSIMLossBackwardCUDA(
+  torch::Tensor& mask,
+  float lambda_dssim,
+  torch::Tensor& mu1,
+  torch::Tensor& mu2,
   torch::Tensor& sigma1_sq,
   torch::Tensor& sigma2_sq,
   torch::Tensor& sigma12

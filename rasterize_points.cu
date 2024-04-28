@@ -430,44 +430,42 @@ FusedL1LossCUDA(
 }
 
 std::tuple<torch::Tensor, torch::Tensor>
-FusedSSIMLossCUDA(
-  torch::Tensor& image,
-  torch::Tensor& gt_image,
+FusedSSIMLossForwardCUDA(
   torch::Tensor& mask,
   float lambda_dssim,
-  torch::Tensor& mu1_sq,
-  torch::Tensor& mu2_sq,
-  torch::Tensor& mu1_mu2,
+  torch::Tensor& mu1,
+  torch::Tensor& mu2,
   torch::Tensor& sigma1_sq,
   torch::Tensor& sigma2_sq,
   torch::Tensor& sigma12
 )
 {
-  int C = image.size(0);
-  int H = image.size(1);
-  int W = image.size(2);
-  torch::Tensor dL_dimage = torch::zeros({C, H, W}, image.options());
+  int C = mu1.size(0);
+  int H = mu1.size(1);
+  int W = mu1.size(2);
+  torch::Tensor dL_dimage = torch::zeros({C, H, W}, mu1.options());
   auto options = torch::TensorOptions().device(torch::kCUDA);
   torch::Tensor loss = torch::zeros({}, options);
+  printf("Entered FusedSSIMLossCUDA! \n");
 
-  CudaRasterizer::Rasterizer::SSIMlossForwardBackward(
-    image.contiguous().data<float>(),
-    gt_image.contiguous().data<float>(),
+  CudaRasterizer::Rasterizer::SSIMlossForward(
     mask.contiguous().data<bool>(),
     C, H, W,
     lambda_dssim,
 	loss.contiguous().data<float>(),
     dL_dimage.contiguous().data<float>(),
-	mu1_sq.contiguous().data<float>(),
-	mu2_sq.contiguous().data<float>(),
-	mu1_mu2.contiguous().data<float>(),
+	mu1.contiguous().data<float>(),
+	mu2.contiguous().data<float>(),
 	sigma1_sq.contiguous().data<float>(),
 	sigma2_sq.contiguous().data<float>(),
 	sigma12.contiguous().data<float>()
   );
   
+  // return std::make_tuple(loss, dL_dimage);
+  // return std::make_tuple(loss, dL_mu1_sq, dL_mu2_sq, dL_mu1_m2, dl_sigma1_sq, dl_sigma2_sq, dl_sigma1_sigma2);
   return std::make_tuple(loss, dL_dimage);
 }
+
 
 /////////////////////////////// Utility tools ///////////////////////////////
 

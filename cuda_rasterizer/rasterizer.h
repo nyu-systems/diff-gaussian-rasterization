@@ -165,9 +165,7 @@ namespace CudaRasterizer
 		float *loss,
 		float *dL_dimage);
 
-	static float SSIMlossForwardBackward(
-		float *image,
-		float *gt_image,
+	static void SSIMlossForward(
 		bool *mask,
 		int channels,
 		int height,
@@ -175,12 +173,12 @@ namespace CudaRasterizer
 		float lambda_dssim,
 		float *loss,
 		float *dL_dimage,
-		float *mu1_sq,
-		float *mu2_sq,
-		float *mu1_mu2,
+		float *mu1,
+		float *mu2,
 		float *sigma1_sq,
 		float *sigma2_sq,
 		float *sigma12);
+
 	};
 };
 
