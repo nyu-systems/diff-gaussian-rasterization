@@ -1011,21 +1011,19 @@ void CudaRasterizer::Rasterizer::renderBackward(
 
 //////////////////// Loss ////////////////////
 void CudaRasterizer::Rasterizer::l1lossForwardBackward(
-	float *image,
-	float *gt_image,
-	bool *mask,
-	int channels,
-	int height,
-	int width,
-	float lambda_dssim,
-	float *loss,
-	float *dL_dimage
+  float *image,
+  float *gt_image,
+  bool *mask,
+  int channels,
+  int height,
+  int width,
+  float lambda_dssim,
+  float *buffer,
+  float *loss,
+  float *dL_dimage
 )
 {
   // L1 loss.
-  float *l1output;
-  cudaMalloc(&l1output, channels * height * sizeof(float));
-
   int blockSize = std::min(width, 1024); // Try to cover a whole row with one block.
   dim3 dimGrid(channels, height);
 
@@ -1037,7 +1035,7 @@ void CudaRasterizer::Rasterizer::l1lossForwardBackward(
     height,
     width,
     lambda_dssim,
-    l1output,
+    buffer,
     dL_dimage
   );
   
@@ -1045,13 +1043,86 @@ void CudaRasterizer::Rasterizer::l1lossForwardBackward(
   // cudaDeviceSynchronize(); // **Important: Sync issue occurs without this line.
 
   L1ReduceLossCUDA<<<1, 1>>>(
-    l1output,
+    buffer,
     channels,
     height,
     loss
   );
+}
 
-  cudaFree(l1output);
+void CudaRasterizer::Rasterizer::SSIMlossForwardBackward(
+	bool *mask,
+	int channels,
+	int height,
+	int width,
+	float lambda_dssim,
+	float *mu1,
+	float *mu2,
+	float *sigma1_sq,
+	float *sigma2_sq,
+	float *sigma12,
+  float *loss,
+	float *dmu1,
+  float *dmu2,
+  float *dsigma1_sq,
+  float *dsigma2_sq,
+  float *dsigma12
+)
+{
+	
+	// SSIM loss.
+	float *SSIMoutput;
+	cudaMalloc(&SSIMoutput, channels * height * width * sizeof(float));
+
+	float *block_SSIMoutput;
+	cudaMalloc(&block_SSIMoutput, num_blocks * sizeof(float));
+	cudaMemset(block_SSIMoutput, 0, num_blocks * sizeof(float));
+
+	dim3 dimBlock(16, 16); // Adjust block size as needed
+  dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, (height + dimBlock.y - 1) / dimBlock.y, channels);
+
+  SSIMLossCUDA<<<dimGrid, dimBlock>>>(
+    mask,
+    channels,
+    height,
+    width,
+    lambda_dssim,
+    mu1,
+		mu2,
+		sigma1_sq,
+		sigma2_sq,
+		sigma12,
+		SSIMoutput,
+		dmu1,
+    dmu2,
+    dsigma1_sq,
+    dsigma2_sq,
+    dsigma12
+  );
+
+  	float *loss;
+	cudaMalloc(&loss, sizeof(float));
+	cudaMemset(loss, 0, sizeof(float));
+
+	int num_pixels = channels * height * width;
+
+	int threads_per_block = 1024;
+	int blocks = (num_blocks + threads_per_block - 1) / threads_per_block;
+	block_sum<<<blocks, threads_per_block, threads_per_block * sizeof(float)>>>(block_SSIMoutput, loss, num_blocks);
+
+	float h_loss;
+	cudaMemcpy(&h_loss, loss, sizeof(float), cudaMemcpyDeviceToHost);
+	h_loss /= num_pixels;
+
+	cudaFree(block_SSIMoutput);
+	cudaFree(loss);
+	// kernel 算万了以后做reduction
+	// cub::DeviceReduce::Sum(d_temp_storage, temp_storage_bytes, SSIMoutput, loss, num_items);
+	// cudaMalloc(&d_temp_storage, temp_storage_bytes);
+	// cub::DeviceReduce::Sum(d_temp_storage, temp_storage_bytes, SSIMoutput, loss, num_items);
+
+	printf("SSIM Loss: %f\n", h_loss);
+
 }
 
 void CudaRasterizer::Rasterizer::SSIMlossForwardBackward(

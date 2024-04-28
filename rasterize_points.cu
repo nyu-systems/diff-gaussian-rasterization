@@ -413,6 +413,7 @@ FusedL1LossCUDA(
   int H = image.size(1);
   int W = image.size(2);
   torch::Tensor dL_dimage = torch::zeros({C, H, W}, image.options());
+  torch::Tensor buffer = torch::zeros({C, H}, image.options());
   auto options = torch::TensorOptions().device(torch::kCUDA);
   torch::Tensor loss = torch::zeros({}, options);
 
@@ -422,6 +423,7 @@ FusedL1LossCUDA(
     mask.contiguous().data<bool>(),
     C, H, W,
     lambda_dssim,
+    buffer.contiguous().data<float>(),
     loss.contiguous().data<float>(),
     dL_dimage.contiguous().data<float>()
   );

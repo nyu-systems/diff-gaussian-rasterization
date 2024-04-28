@@ -155,15 +155,16 @@ namespace CudaRasterizer
     /////////////////////////////// Loss ///////////////////////////////
 
     static void l1lossForwardBackward(
-		float *image,
-		float *gt_image,
-		bool *mask,
-		int channels,
-		int height,
-		int width,
-		float lambda_dssim,
-		float *loss,
-		float *dL_dimage);
+      float *image,
+      float *gt_image,
+      bool *mask,
+      int channels,
+      int height,
+      int width,
+      float lambda_dssim,
+      float *buffer,
+      float *loss,
+      float *dL_dimage);
 
 	static void SSIMlossForwardBackward(
 		bool *mask,
