@@ -115,6 +115,34 @@ namespace CudaRasterizer
 			float* dL_dsh,//gradients of input of this operator
 			bool debug,
 			const pybind11::dict &args);
+
+
+		static void preprocessBackwardBatches(
+			const int num_viewpoints,
+			const int* radii,
+			const float* cov3D,
+			const bool* clamped,
+			const int P, int D, int M, int R,
+			const int width, int height,
+			const float* means3D,
+			const float* scales,
+			const float* rotations,
+			const float* shs,
+			const float scale_modifier,
+			const float* viewmatrix,
+			const float* projmatrix,
+			const float* campos,
+			const float* tan_fovx, const float* tan_fovy,
+			const float* dL_dmean2D,
+			const float* dL_dconic,
+			float* dL_dcolor,
+			float* dL_dmean3D,
+			float* dL_dcov3D,
+			float* dL_dscale,
+			float* dL_drot,
+			float* dL_dsh,
+			bool debug,
+			const pybind11::dict &args);
 		
 
 		////////////////////// GetDistributionStrategy ////////////////////////

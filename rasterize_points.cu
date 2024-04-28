@@ -387,7 +387,7 @@ PreprocessGaussiansBackwardCUDABatches(
             projmatrix.contiguous().data<float>(),
             campos.contiguous().data<float>(),
 			tan_fovx.contiguous().data<float>(),
-            tan_fovy.contiguous().data<float>(),,//rasterization setting.
+            tan_fovy.contiguous().data<float>(),//rasterization setting.
             dL_dmeans2D.contiguous().data<float>(),
             dL_dconic.contiguous().data<float>(),
             dL_dcolors.contiguous().data<float>(),//gradients of output of this operator
