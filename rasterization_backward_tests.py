@@ -284,7 +284,12 @@ def test_batched_gaussian_rasterizer_batch_processing():
 
 
 def compare_tensors(tensor1, tensor2):
-    if tensor1.shape != tensor2.shape:
+    if tensor1 is None and tensor2 is None:
+        return True
+    elif tensor1 is None or tensor2 is None:
+        print("One of the tensors is None.")
+        return False
+    elif tensor1.shape != tensor2.shape:
         print("Tensors have different shapes:")
         print("Tensor 1 shape:", tensor1.shape)
         print("Tensor 2 shape:", tensor2.shape)
@@ -331,17 +336,17 @@ if __name__ == "__main__":
         batched_dL_opacity_batch_processed,
     ) = test_batched_gaussian_rasterizer_batch_processing()
 
-    assert compare_tensors(batched_means2D, batched_means2D_batch_processed)
-    assert compare_tensors(batched_radii, batched_radii_batch_processed)
-    assert compare_tensors(batched_conic_opacity, batched_conic_opacity_batch_processed)
+    assert compare_tensors(batched_means2D, batched_means2D_batch_processed), "Means2D do not match."
+    assert compare_tensors(batched_radii, batched_radii_batch_processed), "Radii do not match."
+    assert compare_tensors(batched_conic_opacity, batched_conic_opacity_batch_processed), "Conic opacity do not match."
 
-    assert compare_tensors(batched_rgb, batched_rgb_batch_processed)
-    assert compare_tensors(batched_depths, batched_depths_batch_processed)
-    assert len(batched_screenspace_params) == len(batched_screenspace_params_batch_processed)
+    assert compare_tensors(batched_rgb, batched_rgb_batch_processed), "RGB values do not match."
+    assert compare_tensors(batched_depths, batched_depths_batch_processed), "Depths do not match."
+    assert len(batched_screenspace_params) == len(batched_screenspace_params_batch_processed), "Screenspace params do not match."
 
     # -------BACKWARD PASS-------
-    assert compare_tensors(batched_dL_means3D, batched_dL_means3D_batch_processed)
-    assert compare_tensors(batched_dL_scales, batched_dL_scales_batch_processed)
-    assert compare_tensors(batched_dL_rotations, batched_dL_rotations_batch_processed)
-    assert compare_tensors(batched_dL_shs, batched_dL_shs_batch_processed)
-    assert compare_tensors(batched_dL_opacity, batched_dL_opacity_batch_processed)
+    assert compare_tensors(batched_dL_means3D, batched_dL_means3D_batch_processed), "dL_means3D do not match."
+    assert compare_tensors(batched_dL_scales, batched_dL_scales_batch_processed), "dL_scales do not match."
+    assert compare_tensors(batched_dL_rotations, batched_dL_rotations_batch_processed), "dL_rotations do not match."
+    assert compare_tensors(batched_dL_shs, batched_dL_shs_batch_processed), "dL_shs do not match."
+    assert compare_tensors(batched_dL_opacity, batched_dL_opacity_batch_processed), "dL_opacity do not match."
