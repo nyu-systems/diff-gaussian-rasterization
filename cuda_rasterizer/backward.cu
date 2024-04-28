@@ -279,7 +279,7 @@ __global__ void computeCov2DCUDABatched(
 	const float3* means,
 	const int* radii,
 	const float* cov3Ds,
-	const int W, const int H,
+	const int image_width, const int image_height,
 	const float* tan_fovx, const float* tan_fovy,
 	const float* viewmatrix_arr,
 	const float* dL_dconics,
@@ -317,8 +317,8 @@ __global__ void computeCov2DCUDABatched(
 	const float x_grad_mul = txtz < -limx || txtz > limx ? 0 : 1;
 	const float y_grad_mul = tytz < -limy || tytz > limy ? 0 : 1;
 
-    const float h_x = W / (2.0f * tan_fovx[viewpoint_idx]);
-    const float h_y = H / (2.0f * tan_fovy[viewpoint_idx]);
+    const float h_x = image_width / (2.0f * tan_fovx[viewpoint_idx]);
+    const float h_y = image_height / (2.0f * tan_fovy[viewpoint_idx]);
 	glm::mat3 J = glm::mat3(h_x / t.z, 0.0f, -(h_x * t.x) / (t.z * t.z),
 		0.0f, h_y / t.z, -(h_y * t.y) / (t.z * t.z),
 		0, 0, 0);
