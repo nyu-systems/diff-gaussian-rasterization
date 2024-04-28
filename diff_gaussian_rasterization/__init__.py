@@ -354,32 +354,35 @@ class _FusedLoss(torch.autograd.Function):
     # l1_loss = torch.tensor(l1_loss, device=image.device)
     
     # TODO: SSIM loss implementation.
-    SSIM_loss, dSSIM_dimage = _C.fused_SSIM_loss_forward(*args2)
+    SSIM_loss, dmu1, dmu2, dsigma1_sq, dsigma2_sq, dsigma12 = _C.fused_SSIM_loss(*args2)
     #loss = l1_loss
-    
     #ctx.save_for_backward(dl1_dimage)
-    ctx.save_for_backward(dSSIM_dimage)
+    ctx.save_for_backward(dmu1, dmu2, dsigma1_sq, dsigma2_sq, dsigma12)
     
     #return loss
     return SSIM_loss
   
   @staticmethod
   def backward(ctx, grad_loss):
-    (dSSIM_dimage,) = ctx.saved_tensors
+    (dmu1, dmu2, dsigma1_sq, dsigma2_sq, dsigma12) = ctx.saved_tensors
 
     #dL_dimage = dSSIM_dimage * grad_loss
-    dL_dimage = dSSIM_dimage * grad_loss
+    dL_dmu1 = dmu1 * grad_loss
+    dL_dmu2 = dmu2 * grad_loss
+    dL_dsigma1_sq = dsigma1_sq * grad_loss
+    dL_dsigma2_sq = dsigma2_sq * grad_loss
+    dL_dsigma12 = dsigma12 * grad_loss
     
     grads = (
-      dL_dimage.contiguous(),
       None,
       None,
       None,
       None,
-      None,
-      None,
-      None,
-      None
+      dL_dmu1,
+      dL_dmu2,
+      dL_dsigma1_sq,
+      dL_dsigma2_sq,
+      dL_dsigma12
     )
     
     return grads    # need to align with input

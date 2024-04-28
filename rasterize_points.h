@@ -174,7 +174,7 @@ FusedL1LossCUDA(
   float lambda_dssim
 );
 
-std::tuple<torch::Tensor, torch::Tensor>
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 FusedSSIMLossCUDA(
   torch::Tensor& mask,
   float lambda_dssim,

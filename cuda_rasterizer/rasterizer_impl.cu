@@ -370,18 +370,22 @@ __global__ void L1ReduceLossCUDA(
 }
 
 __global__ void SSIMLossCUDA(
-  float *mu1_tensor,
-  float *mu2_tensor,
-  float *sigma1_sq_tensor,
-  float *sigma2_sq_tensor,
-  float *sigma12_tensor,
 	bool *mask,
   int channels,
   int height,
   int width,
   float lambda_dssim,
+  float *mu1_tensor,
+  float *mu2_tensor,
+  float *sigma1_sq_tensor,
+  float *sigma2_sq_tensor,
+  float *sigma12_tensor,
   float *SSIMoutput,
-  float *dL_dimage
+  float *dmu1,
+  float *dmu2,
+  float *dsigma1_sq,
+  float *dsigma2_sq,
+  float *dsigma12
 )
 {
   int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -393,25 +397,31 @@ __global__ void SSIMLossCUDA(
 
 	if (x < width && y < height && c < channels) {
     int index = c * width * height + y * width + x;
-    float mu1_sq = mu1_tensor[index];
-    float mu2_sq = mu2_tensor[index];
+    float mu1 = mu1_tensor[index];
+    float mu2 = mu2_tensor[index];
 
-    float mu1_mu2 = mu1_sq * mu2_sq;
-    mu1_sq *= mu1_sq;
-    mu2_sq *= mu2_sq;
+    float mu1_sq = mu1 * mu1;
+    float mu2_sq = mu2 * mu2;
+    float mu1_mu2 = mu1 * mu2;
 
     float sigma1_sq = sigma1_sq_tensor[index] - mu1_sq;
     float sigma2_sq = sigma2_sq_tensor[index] - mu2_sq;
     float sigma12 = sigma12_tensor[index] - mu1_mu2;
 
-    float ssim = 
-      ((2 * mu1_mu2 + C1) * (2 * sigma12 + C2)) / 
-      ((mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2));
-    
-    ssim *= mask[y * width + x];
-
-		SSIMoutput[index] = ssim;
-    }
+    float A = 2 * mu1_mu2 + C1;
+    float B = 2 * sigma12 + C2;
+    float C = mu1_sq + mu2_sq + C1;
+    float D = sigma1_sq + sigma2_sq + C2;
+    float ssim = (A * B) / (C * D);
+      // ((2 * mu1_mu2 + C1) * (2 * sigma12 + C2)) / 
+      // ((mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2));
+		SSIMoutput[index] = ssim * mask[y * width + x];
+    dmu1[index] = mask[y * width + x] * ((B * 2 * mu2) / (C * D) - (A * 2 * mu2) / (C * D) - (A * B * 2 * mu1) / (C * C * D) + (A * B * 2 * mu1) / (C * D * D));
+    dmu2[index] = mask[y * width + x] * ((B * 2 * mu1) / (C * D) - (A * 2 * mu1) / (C * D) - (A * B * 2 * mu2) / (C * C * D) + (A * B * 2 * mu2) / (C * D * D));
+    dsigma1_sq[index] = mask[y * width + x] * (-1) * (A * B) / (C * D * D);
+    dsigma2_sq[index] = mask[y * width + x] * (-1) * (A * B) / (C * D * D);
+    dsigma12[index] = mask[y * width + x] * (A * 2) / (C * D);
+  }
 }
 
 
@@ -992,19 +1002,23 @@ void CudaRasterizer::Rasterizer::l1lossForwardBackward(
   cudaFree(l1output);
 }
 
-void CudaRasterizer::Rasterizer::SSIMlossForward(
+void CudaRasterizer::Rasterizer::SSIMlossForwardBackward(
 	bool *mask,
 	int channels,
 	int height,
 	int width,
 	float lambda_dssim,
-	float *loss,
-	float *dL_dimage,
 	float *mu1,
 	float *mu2,
 	float *sigma1_sq,
 	float *sigma2_sq,
-	float *sigma12
+	float *sigma12,
+  float *loss,
+	float *dmu1,
+  float *dmu2,
+  float *dsigma1_sq,
+  float *dsigma2_sq,
+  float *dsigma12
 )
 {
 	// SSIM loss.
@@ -1015,18 +1029,22 @@ void CudaRasterizer::Rasterizer::SSIMlossForward(
   dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, (height + dimBlock.y - 1) / dimBlock.y, channels);
 
   SSIMLossCUDA<<<dimGrid, dimBlock>>>(
+    mask,
+    channels,
+    height,
+    width,
+    lambda_dssim,
     mu1,
 		mu2,
 		sigma1_sq,
 		sigma2_sq,
 		sigma12,
-		mask,
-    channels,
-    height,
-    width,
-    lambda_dssim,
 		SSIMoutput,
-		dL_dimage
+		dmu1,
+    dmu2,
+    dsigma1_sq,
+    dsigma2_sq,
+    dsigma12
   );
 
 	int num_items = channels * height * width;
