@@ -60,18 +60,23 @@ class _PreprocessGaussians(torch.autograd.Function):
 
         # Restructure arguments the way that the C++ lib expects them
         if isinstance(raster_settings, list):
-            rs = raster_settings[0]
-            rs.viewmatrix, rs.projmatrix, rs.campos = [
+            viewmatrix, projmatrix, campos = [
                 torch.stack(tensors) for tensors in zip(
                     *[(rs.viewmatrix, rs.projmatrix, rs.campos) for rs in raster_settings]
                 )
             ]
-            rs.tanfovx, rs.tanfovy = [
+            tanfovx, tanfovy = [
                 torch.tensor(vals, device=means3D.device)
                 for vals in zip(*[(rs.tanfovx, rs.tanfovy) for rs in raster_settings])
             ]
-            raster_settings = rs
-            
+            raster_settings = raster_settings[0]._replace(
+                tanfovx=tanfovx,
+                tanfovy=tanfovy,
+                viewmatrix=viewmatrix,
+                projmatrix=projmatrix,
+                campos=campos
+            )  
+                      
         args = (
             means3D,
             scales,
