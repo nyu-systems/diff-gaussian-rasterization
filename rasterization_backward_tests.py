@@ -10,7 +10,7 @@ from diff_gaussian_rasterization import (
 )
 
 num_gaussians = 10000
-num_batches=32
+num_batches = 32
 means3D = torch.randn(num_gaussians, 3).cuda()
 scales = torch.randn(num_gaussians, 3).cuda()
 rotations = torch.randn(num_gaussians, 4).cuda()
@@ -23,6 +23,7 @@ scales.requires_grad = True
 rotations.requires_grad = True
 shs.requires_grad = True
 opacity.requires_grad = True
+
 
 def get_cuda_args(strategy, mode="train"):
     cuda_args = {
@@ -44,11 +45,11 @@ def get_cuda_args(strategy, mode="train"):
     return cuda_args
 
 
-def test_batched_gaussian_rasterizer():       
+def test_batched_gaussian_rasterizer():
     # Set up the viewpoint cameras
     batched_viewpoint_cameras = []
     for _ in range(num_batches):
-        viewpoint_camera = type('ViewpointCamera', (), {})
+        viewpoint_camera = type("ViewpointCamera", (), {})
         viewpoint_camera.FoVx = math.radians(60)
         viewpoint_camera.FoVy = math.radians(60)
         viewpoint_camera.image_height = 512
@@ -64,9 +65,9 @@ def test_batched_gaussian_rasterizer():
     # Set up other parameters
     bg_color = torch.ones(3).cuda()
     scaling_modifier = 1.0
-    pc = type('PC', (), {})
+    pc = type("PC", (), {})
     pc.active_sh_degree = SH_ACTIVE_DEGREE
-    pipe = type('Pipe', (), {})
+    pipe = type("Pipe", (), {})
     pipe.debug = False
     mode = "train"
 
@@ -75,12 +76,12 @@ def test_batched_gaussian_rasterizer():
     batched_screenspace_params = []
     batched_means2D = []
     batched_radii = []
-    batched_conic_opacity=[]
-    batched_depths=[]
-    batched_rgb=[]
+    batched_conic_opacity = []
+    batched_depths = []
+    batched_rgb = []
 
     start_time = time.time()
-    
+
     for i, (viewpoint_camera, strategy) in enumerate(zip(batched_viewpoint_cameras, batched_strategies)):
         ########## [START] Prepare CUDA Rasterization Settings ##########
         cuda_args = get_cuda_args(strategy, mode)
@@ -101,19 +102,14 @@ def test_batched_gaussian_rasterizer():
             sh_degree=pc.active_sh_degree,
             campos=viewpoint_camera.camera_center,
             prefiltered=False,
-            debug=pipe.debug
+            debug=pipe.debug,
         )
         rasterizer = GaussianRasterizer(raster_settings=raster_settings)
         ########## [END] Prepare CUDA Rasterization Settings ##########
 
-        #[3DGS-wise preprocess]
+        # [3DGS-wise preprocess]
         means2D, rgb, conic_opacity, radii, depths = rasterizer.preprocess_gaussians(
-            means3D=means3D,
-            scales=scales,
-            rotations=rotations,
-            shs=shs,
-            opacities=opacity,
-            cuda_args=cuda_args
+            means3D=means3D, scales=scales, rotations=rotations, shs=shs, opacities=opacity, cuda_args=cuda_args
         )
 
         # TODO: make the below work
@@ -129,38 +125,48 @@ def test_batched_gaussian_rasterizer():
         batched_conic_opacity.append(conic_opacity)
         batched_depths.append(depths)
 
-
     end_time = time.time()
     preprocess_time = end_time - start_time
     print(f"Time taken by test_batched_gaussian_rasterizer: {preprocess_time:.4f} seconds")
     # Perform further operations with the batched results
     # Test results and performance
-   
+
     batched_means2D = torch.stack(batched_means2D, dim=0)
     batched_radii = torch.stack(batched_radii, dim=0)
-    batched_conic_opacity=torch.stack(batched_conic_opacity,dim=0)
-    batched_rgb=torch.stack(batched_rgb,dim=0)
-    batched_depths=torch.stack(batched_depths,dim=0)
+    batched_conic_opacity = torch.stack(batched_conic_opacity, dim=0)
+    batched_rgb = torch.stack(batched_rgb, dim=0)
+    batched_depths = torch.stack(batched_depths, dim=0)
 
-
-    start_backward=time.time()
-    target_batched_means3d=torch.ones(means3D.shape).cuda()
+    start_backward = time.time()
+    target_batched_means3d = torch.ones(means3D.shape).cuda()
     loss = (means3D - target_batched_means3d).pow(2).mean()
     loss.backward()
-    end_backward=time.time()
-    preproc_back=end_backward-start_backward
+    end_backward = time.time()
+    preproc_back = end_backward - start_backward
     print(f"Time taken by test_batched_gaussian_rasterizer BACKWARD: {preproc_back:.4f} seconds")
-    
-    return batched_means2D, batched_radii, batched_screenspace_params,batched_conic_opacity,batched_rgb,batched_depths,means3D.grad
-    
-    
+
+    return (
+        batched_means2D,
+        batched_radii,
+        batched_screenspace_params,
+        batched_conic_opacity,
+        batched_rgb,
+        batched_depths,
+        means3D.grad,
+        scales.grad,
+        rotations.grad,
+        shs.grad,
+        opacity.grad,
+    )
+
+
 def test_batched_gaussian_rasterizer_batch_processing():
     # Set up the input data
     start_time = time.time()
     # Set up the viewpoint cameras
     batched_viewpoint_cameras = []
     for _ in range(num_batches):
-        viewpoint_camera = type('ViewpointCamera', (), {})
+        viewpoint_camera = type("ViewpointCamera", (), {})
         viewpoint_camera.FoVx = math.radians(60)
         viewpoint_camera.FoVy = math.radians(60)
         viewpoint_camera.image_height = 512
@@ -176,9 +182,9 @@ def test_batched_gaussian_rasterizer_batch_processing():
     # Set up other parameters
     bg_color = torch.ones(3).cuda()
     scaling_modifier = 1.0
-    pc = type('PC', (), {})
+    pc = type("PC", (), {})
     pc.active_sh_degree = SH_ACTIVE_DEGREE
-    pipe = type('Pipe', (), {})
+    pipe = type("Pipe", (), {})
     pipe.debug = False
     mode = "train"
 
@@ -204,7 +210,7 @@ def test_batched_gaussian_rasterizer_batch_processing():
             sh_degree=pc.active_sh_degree,
             campos=viewpoint_camera.camera_center,
             prefiltered=False,
-            debug=pipe.debug
+            debug=pipe.debug,
         )
         raster_settings_batch.append(raster_settings)
 
@@ -212,13 +218,19 @@ def test_batched_gaussian_rasterizer_batch_processing():
     rasterizer = GaussianRasterizerBatches(raster_settings_batch=raster_settings_batch)
 
     # Preprocess the Gaussians for the entire batch
-    batched_means2D, batched_rgb, batched_conic_opacity, batched_radii, batched_depths = rasterizer.preprocess_gaussians(
+    (
+        batched_means2D,
+        batched_rgb,
+        batched_conic_opacity,
+        batched_radii,
+        batched_depths,
+    ) = rasterizer.preprocess_gaussians(
         means3D=means3D,
         scales=scales,
         rotations=rotations,
         shs=shs,
         opacities=opacity,
-        batched_cuda_args=batched_cuda_args[0]  #TODO: look into sending list of cuda_args/strategies
+        batched_cuda_args=batched_cuda_args[0],  # TODO: look into sending list of cuda_args/strategies
     )
     end_time = time.time()
     preprocess_time = end_time - start_time
@@ -228,15 +240,14 @@ def test_batched_gaussian_rasterizer_batch_processing():
     # if mode == "train":
     #     batched_means2D.retain_grad()
 
-
     # Perform assertions on the preprocessed data
-    
+
     assert batched_means2D.shape == (num_batches, num_gaussians, 2)
     assert batched_rgb.shape == (num_batches, num_gaussians, 3)
-    assert batched_conic_opacity.shape == (num_batches, num_gaussians,4)
+    assert batched_conic_opacity.shape == (num_batches, num_gaussians, 4)
     assert batched_radii.shape == (num_batches, num_gaussians)
     assert batched_depths.shape == (num_batches, num_gaussians)
-    
+
     batched_screenspace_params = []
     for i in range(num_batches):
         means2D = batched_means2D[i]
@@ -244,20 +255,32 @@ def test_batched_gaussian_rasterizer_batch_processing():
         conic_opacity = batched_conic_opacity[i]
         radii = batched_radii[i]
         depths = batched_depths[i]
-        
+
         screenspace_params = [means2D, rgb, conic_opacity, radii, depths]
         batched_screenspace_params.append(screenspace_params)
 
-    start_backward=time.time()
-    means3D.grad.zero_()#need to reset it for it to check
-    target_batched_means3d=torch.ones(means3D.shape).cuda()
+    start_backward = time.time()
+    means3D.grad.zero_()  # need to reset it for it to check
+    target_batched_means3d = torch.ones(means3D.shape).cuda()
     loss = (means3D - target_batched_means3d).pow(2).mean()
     loss.backward()
-    end_backward=time.time()
-    preproc_back=end_backward-start_backward
+    end_backward = time.time()
+    preproc_back = end_backward - start_backward
     print(f"Time taken by test_batched_gaussian_rasterizer_batch_processing BACKWARD: {preproc_back:.4f} seconds")
-    
-    return batched_means2D, batched_radii, batched_screenspace_params, batched_conic_opacity,batched_rgb,batched_depths,means3D.grad
+
+    return (
+        batched_means2D,
+        batched_radii,
+        batched_screenspace_params,
+        batched_conic_opacity,
+        batched_rgb,
+        batched_depths,
+        means3D.grad,
+        scales.grad,
+        rotations.grad,
+        shs.grad,
+        opacity.grad,
+    )
 
 
 def compare_tensors(tensor1, tensor2):
@@ -279,10 +302,35 @@ def compare_tensors(tensor1, tensor2):
             print(f"Non-matching values at index {idx}: {value1} != {value2}")
         return False
 
+
 if __name__ == "__main__":
-    batched_means2D, batched_radii, batched_screenspace_params,batched_conic_opacity,batched_rgb,batched_depths,batched_dL_means3D = test_batched_gaussian_rasterizer()
-    batched_means2D_batch_processed, batched_radii_batch_processed, batched_screenspace_params_batch_processed,batched_conic_opacity_batch_processed,batched_rgb_batch_processed,batched_depths_batch_processed,batched_dL_means3D_batch_processed = test_batched_gaussian_rasterizer_batch_processing()
-        
+    (
+        batched_means2D,
+        batched_radii,
+        batched_screenspace_params,
+        batched_conic_opacity,
+        batched_rgb,
+        batched_depths,
+        batched_dL_means3D,
+        batched_dL_scales,
+        batched_dL_rotations,
+        batched_dL_shs,
+        batched_dL_opacity,
+    ) = test_batched_gaussian_rasterizer()
+    (
+        batched_means2D_batch_processed,
+        batched_radii_batch_processed,
+        batched_screenspace_params_batch_processed,
+        batched_conic_opacity_batch_processed,
+        batched_rgb_batch_processed,
+        batched_depths_batch_processed,
+        batched_dL_means3D_batch_processed,
+        batched_dL_scales_batch_processed,
+        batched_dL_rotations_batch_processed,
+        batched_dL_shs_batch_processed,
+        batched_dL_opacity_batch_processed,
+    ) = test_batched_gaussian_rasterizer_batch_processing()
+
     assert compare_tensors(batched_means2D, batched_means2D_batch_processed)
     assert compare_tensors(batched_radii, batched_radii_batch_processed)
     assert compare_tensors(batched_conic_opacity, batched_conic_opacity_batch_processed)
@@ -291,7 +339,9 @@ if __name__ == "__main__":
     assert compare_tensors(batched_depths, batched_depths_batch_processed)
     assert len(batched_screenspace_params) == len(batched_screenspace_params_batch_processed)
 
-    #-------BACKWARD PASS-------
+    # -------BACKWARD PASS-------
     assert compare_tensors(batched_dL_means3D, batched_dL_means3D_batch_processed)
-    
-
+    assert compare_tensors(batched_dL_scales, batched_dL_scales_batch_processed)
+    assert compare_tensors(batched_dL_rotations, batched_dL_rotations_batch_processed)
+    assert compare_tensors(batched_dL_shs, batched_dL_shs_batch_processed)
+    assert compare_tensors(batched_dL_opacity, batched_dL_opacity_batch_processed)
