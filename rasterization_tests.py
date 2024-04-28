@@ -168,7 +168,7 @@ def test_batched_gaussian_rasterizer_batch_processing():
     mode = "train"
 
     # Set up rasterization configuration for the batch
-    batched_raster_settings = []
+    raster_settings_batch = []
     batched_cuda_args = []
     for i, (viewpoint_camera, strategy) in enumerate(zip(batched_viewpoint_cameras, batched_strategies)):
         ########## [START] Prepare CUDA Rasterization Settings ##########
@@ -191,10 +191,10 @@ def test_batched_gaussian_rasterizer_batch_processing():
             prefiltered=False,
             debug=pipe.debug
         )
-        batched_raster_settings.append(raster_settings)
+        raster_settings_batch.append(raster_settings)
 
     # Create the GaussianRasterizer for the batch
-    rasterizer = GaussianRasterizerBatches(raster_settings=batched_raster_settings)
+    rasterizer = GaussianRasterizerBatches(raster_settings_batch=raster_settings_batch)
 
     # Preprocess the Gaussians for the entire batch
     batched_means2D, batched_rgb, batched_conic_opacity, batched_radii, batched_depths = rasterizer.preprocess_gaussians(
