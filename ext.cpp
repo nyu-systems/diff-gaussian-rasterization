@@ -32,6 +32,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
 
   m.def("get_block_XY", &GetBlockXY);
 
-  m.def("fuse_adam_step", &FuseAdamStepCUDA);
+  m.def("fuse_adam_step_single_tensor", &FuseAdamStepCUDASingleTensor);
+  m.def("fuse_adam_step_multi_tensor", &FuseAdamStepCUDAMultiTensor);
 
 }

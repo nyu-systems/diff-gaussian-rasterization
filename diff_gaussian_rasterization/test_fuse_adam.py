@@ -35,12 +35,12 @@ class SimpleNet(nn.Module):
         return x
 
 model = SimpleNet().to("cuda:0")
-# print("################ Test Fused Adam : Single tensor #################")
-# optimizer = FusedAdam(model.parameters(), lr=0.0001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, weight_decay=0.0, multi_tensor=True)
+print("################ Test Fused Adam : Single tensor #################")
+optimizer = FusedAdam(model.parameters(), lr=0.0001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, weight_decay=0.0, multi_tensor=False)
 # print("################ Test Fused Adam : Multi tensor #################")
 # optimizer = FusedAdam(model.parameters(), lr=0.0001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, weight_decay=0.0, multi_tensor=True)
-print("################ Test Pytorch Adam #################")
-optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.0)
+# print("################ Test Pytorch Adam #################")
+# optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.0)
 
 
 criterion = nn.MSELoss()
