@@ -17,21 +17,21 @@ namespace cg = cooperative_groups;
 
 // Backward pass for conversion of spherical harmonics to RGB for
 // each Gaussian.
-__device__ void computeColorFromSH(int idx, int view_idx, int deg, int max_coeffs, const glm::vec3* means, glm::vec3 campos, const float* shs, const bool* clamped, const glm::vec3* dL_dcolor, glm::vec3* dL_dmeans, glm::vec3* dL_dshs)
+__device__ void computeColorFromSH(int point_idx, int result_idx, int deg, int max_coeffs, const glm::vec3* means, glm::vec3 campos, const float* shs, const bool* clamped, const glm::vec3* dL_dcolor, glm::vec3* dL_dmeans, glm::vec3* dL_dshs)
 {
 	// Compute intermediate values, as it is done during forward
-	glm::vec3 pos = means[idx];
+	glm::vec3 pos = means[point_idx];
 	glm::vec3 dir_orig = pos - campos;
 	glm::vec3 dir = dir_orig / glm::length(dir_orig);
 
-	glm::vec3* sh = ((glm::vec3*)shs) + idx * max_coeffs;
+	glm::vec3* sh = ((glm::vec3*)shs) + point_idx * max_coeffs;
 
 	// Use PyTorch rule for clamping: if clamping was applied,
 	// gradient becomes 0.
-	glm::vec3 dL_dRGB = dL_dcolor[idx];
-	dL_dRGB.x *= clamped[3 * view_idx + 0] ? 0 : 1;
-	dL_dRGB.y *= clamped[3 * view_idx + 1] ? 0 : 1;
-	dL_dRGB.z *= clamped[3 * view_idx + 2] ? 0 : 1;
+	glm::vec3 dL_dRGB = dL_dcolor[point_idx];
+	dL_dRGB.x *= clamped[3 * result_idx + 0] ? 0 : 1;
+	dL_dRGB.y *= clamped[3 * result_idx + 1] ? 0 : 1;
+	dL_dRGB.z *= clamped[3 * result_idx + 2] ? 0 : 1;
 
 	glm::vec3 dRGBdx(0, 0, 0);
 	glm::vec3 dRGBdy(0, 0, 0);
@@ -41,7 +41,7 @@ __device__ void computeColorFromSH(int idx, int view_idx, int deg, int max_coeff
 	float z = dir.z;
 
 	// Target location for this Gaussian to write SH gradients to
-	glm::vec3* dL_dsh = dL_dshs + idx * max_coeffs;
+	glm::vec3* dL_dsh = dL_dshs + point_idx * max_coeffs;
 
 	// No tricks here, just high school-level calculus.
 	float dRGBdsh0 = SH_C0;
@@ -135,7 +135,7 @@ __device__ void computeColorFromSH(int idx, int view_idx, int deg, int max_coeff
 	// Gradients of loss w.r.t. Gaussian means, but only the portion 
 	// that is caused because the mean affects the view-dependent color.
 	// Additional mean gradient is accumulated in below methods.
-	dL_dmeans[idx] += glm::vec3(dL_dmean.x, dL_dmean.y, dL_dmean.z);
+	dL_dmeans[point_idx] += glm::vec3(dL_dmean.x, dL_dmean.y, dL_dmean.z);
 }
 
 // Backward version of INVERSE 2D covariance matrix computation
