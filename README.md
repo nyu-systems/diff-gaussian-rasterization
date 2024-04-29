@@ -17,3 +17,7 @@ Used as the rasterization engine for the paper "3D Gaussian Splatting for Real-T
 }</code></pre>
   </div>
 </section>
+
+## Running tests
+Use pytest to run the tests. The tests are located in the `tests` directory. To run all tests, simply run `pytest` in the root directory of the project. 
+Use the `--capture=no` flag to see the output of the tests including the performance metrics.

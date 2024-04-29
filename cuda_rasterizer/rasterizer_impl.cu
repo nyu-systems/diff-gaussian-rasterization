@@ -547,7 +547,7 @@ void CudaRasterizer::Rasterizer::preprocessBackward(
 	auto [global_rank, world_size, iteration, log_interval, device, zhx_debug, zhx_time, mode, dist_division_mode, log_folder] = prepareArgs(args);
 
 	MyTimerOnGPU timer;
-	const float focal_y = height / (2.0f * tan_fovy);
+    const float focal_y = height / (2.0f * tan_fovy);
 	const float focal_x = width / (2.0f * tan_fovx);
 
 	const float* cov3D_ptr = cov3D;
@@ -563,7 +563,7 @@ void CudaRasterizer::Rasterizer::preprocessBackward(
 		cov3D_ptr,
 		viewmatrix,
 		projmatrix,
-		focal_x, focal_y,
+        focal_x, focal_y,
 		tan_fovx, tan_fovy,
 		(glm::vec3*)campos,
 		(float3*)dL_dmean2D,
@@ -583,6 +583,70 @@ void CudaRasterizer::Rasterizer::preprocessBackward(
 }
 
 
+void CudaRasterizer::Rasterizer::preprocessBackwardBatches(
+    const int num_viewpoints,
+	const int* radii,
+	const float* cov3D,
+	const bool* clamped,//the above are all per-Gaussian intemediate results.
+	const int P, int D, int M, int R,
+	const int width, int height,//rasterization setting.
+	const float* means3D,
+	const float* scales,
+	const float* rotations,
+	const float* shs,//input of this operator
+	const float scale_modifier,
+	const float* viewmatrix,
+	const float* projmatrix,
+	const float* campos,
+	const float* tan_fovx, const float* tan_fovy,//rasterization setting.
+	const float* dL_dmean2D,
+	const float* dL_dconic,
+	float* dL_dcolor,//gradients of output of this operator. TODO: dL_dcolor is not const here because low-level implementation does not use const. Even though, we never modify it. 
+	float* dL_dmean3D,
+	float* dL_dcov3D,
+	float* dL_dscale,
+	float* dL_drot,
+	float* dL_dsh,//gradients of input of this operator
+	bool debug,
+	const pybind11::dict &args)
+{
+	auto [global_rank, world_size, iteration, log_interval, device, zhx_debug, zhx_time, mode, dist_division_mode, log_folder] = prepareArgs(args);
+
+	MyTimerOnGPU timer;
+
+	const float* cov3D_ptr = cov3D;
+	timer.start("b20 preprocess");
+	CHECK_CUDA(BACKWARD::preprocess_batch(
+        num_viewpoints,
+        P, D, M,
+		(float3*)means3D,
+		radii,
+		shs,
+		clamped,
+		(glm::vec3*)scales,
+		(glm::vec4*)rotations,
+		scale_modifier,
+		cov3D_ptr,
+		viewmatrix,
+		projmatrix,
+		width, height,
+		tan_fovx, tan_fovy,
+		(glm::vec3*)campos,
+		(float3*)dL_dmean2D,
+		dL_dconic,
+		(glm::vec3*)dL_dmean3D,
+		dL_dcolor,
+		dL_dcov3D,
+		dL_dsh,
+		(glm::vec3*)dL_dscale,
+		(glm::vec4*)dL_drot), debug)
+	timer.stop("b20 preprocess");
+
+	// Print out timing information
+	if (zhx_time && iteration % log_interval == 1) {
+		timer.printAllTimes(iteration, world_size, global_rank, log_folder, false);
+	}
+}
 
 
 

@@ -127,7 +127,8 @@ class _PreprocessGaussians(torch.autograd.Function):
 
         # change dL_dmeans2D from (P, 2) to (P, 3)
         # grad_means2D is (P, 2) now. Need to pad it to (P, 3) because preprocess_gaussians_backward's cuda implementation.
-        grad_means2D_pad = torch.zeros((grad_means2D.shape[0], 1), dtype = grad_means2D.dtype, device = grad_means2D.device)
+        
+        grad_means2D_pad =  torch.zeros_like(grad_means2D[..., :1], dtype = grad_means2D.dtype, device=grad_means2D.device)
         grad_means2D = torch.cat((grad_means2D, grad_means2D_pad), dim = 1).contiguous()
 
         # Restructure args as C++ method expects them
@@ -154,7 +155,10 @@ class _PreprocessGaussians(torch.autograd.Function):
                 raster_settings.debug,
                 cuda_args)
 
-        dL_dmeans3D, dL_dscales, dL_drotations, dL_dsh, dL_dopacity = _C.preprocess_gaussians_backward(*args)
+        if not torch.is_tensor(raster_settings.tanfovx):
+            dL_dmeans3D, dL_dscales, dL_drotations, dL_dsh, dL_dopacity = _C.preprocess_gaussians_backward(*args)
+        else:
+            dL_dmeans3D, dL_dscales, dL_drotations, dL_dsh, dL_dopacity = _C.preprocess_gaussians_backward_batched(*args)
 
         grads = (
             dL_dmeans3D.contiguous(),
