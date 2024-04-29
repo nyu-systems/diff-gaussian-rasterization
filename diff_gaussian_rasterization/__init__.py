@@ -488,12 +488,20 @@ def merge_image_tiles_by_pos(
 
 
 class FusedAdam(torch.optim.Optimizer):
-    def __init__(self, params, lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-8, weight_decay=0.0):
+    def __init__(self, params, lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-8, weight_decay=0.0, multi_tensor=False):
+        self.multi_tensor = multi_tensor
         defaults = dict(lr=lr, beta_1=beta_1, beta_2=beta_2, epsilon=epsilon, weight_decay=weight_decay)
         super(FusedAdam, self).__init__(params, defaults)
-        # print(lr, beta_1, beta_2, epsilon, weight_decay)
+        # print(lr, beta_1, beta_2, eps, weight_decay)
 
     def step(self):
+        if (self.multi_tensor):
+            self._step_multi_tensor()
+        else:
+            self._step_single_tensor()
+
+
+    def _step_single_tensor(self):
         for group in self.param_groups:
             # print(group['params'][-1])
             for p in group['params']:
@@ -521,7 +529,7 @@ class FusedAdam(torch.optim.Optimizer):
                 beta_1, beta_2 = group['beta_1'], group['beta_2']
 
                 state['step'] += 1
-                pp, mt, vt = _C.fuse_adam_step(
+                pp, mt, vt = _C.fuse_adam_step_single_tensor(
                     p, grad, exp_avg, exp_avg_sq, state['step'], 
                     lr, beta_1, beta_2, epsilon, weight_decay)
                 # print((pp - p).norm())
@@ -530,3 +538,79 @@ class FusedAdam(torch.optim.Optimizer):
                 p.data = pp.data
                 exp_avg.data = mt.data
                 exp_avg_sq.data = vt.data
+
+
+    def _step_multi_tensor(self):
+
+        param_list = []
+        grad_list = []
+        exp_avg_list = []
+        exp_avg_sq_list = []
+        lr_list = []
+        beta_1_list = []
+        beta_2_list = []
+        eps_list = []
+        weight_decay_list = []
+        param_start_list = []
+        idx = 0
+        step = 0
+
+        for group in self.param_groups:
+            # print(group['params'][-1])
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+
+                state = self.state[p]
+
+                # print("state len: ", len(state))
+                # State initialization
+                if len(state) == 0:
+                    state['step'] = 0
+                    # Exponential moving averages of gradient
+                    state['exp_avg'] = torch.zeros_like(p.data, dtype=p.dtype, device=p.device)
+                    # Exponential moving average of squared gradient
+                    state['exp_avg_sq'] = torch.zeros_like(p.data, dtype=p.dtype, device=p.device)
+
+                lr = group['lr']
+                epsilon = group['epsilon']
+                weight_decay = group['weight_decay']
+
+                exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
+                beta_1, beta_2 = group['beta_1'], group['beta_2']
+
+                state['step'] += 1
+
+                param_list.append(p.data.contiguous())
+                grad_list.append(p.grad.contiguous())
+                exp_avg_list.append(exp_avg.data.contiguous())
+                exp_avg_sq_list.append(exp_avg_sq.data.contiguous())
+                lr_list.append(lr)
+                beta_1_list.append(beta_1)
+                beta_2_list.append(beta_2)
+                eps_list.append(epsilon)
+                weight_decay_list.append(weight_decay)
+
+                param_start_list.append(idx)
+                idx += p.numel()
+                step = state['step']
+
+        param_start_list.append(idx)
+
+        # pp = torch.concat(param_list)
+        # grad = torch.concat(grad_list)
+        # mt = torch.concat(exp_avg_list)
+        # vt = torch.concat(exp_avg_sq_list)
+        # print(grad.shape, grad.dtype)
+
+        _C.fuse_adam_step_multi_tensor(
+            param_list, grad_list, exp_avg_list, exp_avg_sq_list, step, 
+            lr_list, beta_1_list, beta_2_list, 
+            eps_list, weight_decay_list)
+
+        # for i in range(len(param_list)):
+        #     param_list[i].data = pp[param_start_list[i]:param_start_list[i+1]]
+        #     exp_avg_list[i].data = mt[param_start_list[i]:param_start_list[i+1]]
+        #     exp_avg_sq_list[i].data = vt[param_start_list[i]:param_start_list[i+1]]
+
+

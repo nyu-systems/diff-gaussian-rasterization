@@ -1,6 +1,6 @@
 #pragma once
+#include <vector>
 #include "fuse_adam.h"
-// #include <cuda_profiler_api.h>
 
 // gt = dt + lambda * t
 // mt = beta_1 * mt + (1 - beta_1) * gt
@@ -11,7 +11,7 @@
 // out = t - lr * mt_hat / (sqrt(vt_hat) + epsilon)
 
 template <typename T>
-__global__ void op_adam_kernel(T* t, T* dt, T* mt, T* vt, T* out,
+__global__ void op_adam_single_tensor_kernel(T* t, T* dt, T* mt, T* vt, T* out,
             float lr, float beta_1, float beta_2, float epsilon, float lambda, int step, int total_elements)
 {
 
@@ -33,7 +33,7 @@ __global__ void op_adam_kernel(T* t, T* dt, T* mt, T* vt, T* out,
 
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
-FuseAdamStepCUDA(
+FuseAdamStepCUDASingleTensor(
 	torch::Tensor& pp,
 	torch::Tensor& grad,
 	torch::Tensor& m,
@@ -43,8 +43,7 @@ FuseAdamStepCUDA(
     float beta_1,
     float beta_2,
     float epsilon,
-    float weight_decay) 
-{
+    float weight_decay) {
     const auto total_elements = pp.numel(); 
 
     int num_threads = ONE_DIM_BLOCK_SIZE;
@@ -54,7 +53,7 @@ FuseAdamStepCUDA(
 
     // NCU Test
     // cudaProfilerStart();
-    op_adam_kernel<<<num_blocks, num_threads>>>(
+    op_adam_single_tensor_kernel<<<num_blocks, num_threads>>>(
         pp.contiguous().data<float>(),
         grad.contiguous().data<float>(),
         m.contiguous().data<float>(), 
@@ -71,65 +70,102 @@ FuseAdamStepCUDA(
 	return std::make_tuple(out, m, v);
 }
 
+__global__ void op_adam_multi_tensor_kernel(TensorInfo* tis, int step, int num_params, int tot_num_elems)
+{
 
-
-
-
-// template<typename T>
-// class FusedAdam {
-//     std::vector<torch::Tensor> params;
-//     std::vector<torch::Tensor> mt;
-//     std::vector<torch::Tensor> vt;
-
-//     float lr;
-//     float beta_1;
-//     float beta_2;
-//     float epsilon;
-//     float lambda; // weight_decay
-//     // float vt_max = 0.0;
-//     float t = 0;
-
-//     public:
-
-//     FusedAdam(std::vector<torch::Tensor> params_, float lr_, float beta_1_, float beta_2_, float epsilon_, float lambda): 
-//     params(params_), lr(lr_), beta_1(beta_1_), beta_2(beta_2_), epsilon(epsilon_), lambda(lambda)
-//     {
-//         std::cout << "hyperparameters: " << std::endl;
-//         std::cout << "\tlr: " << lr << ", beta_1: " << beta_1 << ", beta_2: " 
-//                    << beta_2 << ", eps: " << epsilon << ", lambda: " << lambda << std::endl;
-
-//     }
+    int thread_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride_x = blockDim.x * gridDim.x;
     
-//     void step() {
-//         if (t == 0) {
-//             for (const auto& param : params) {
-//             mt.push_back(torch::zeros_like(param, torch::device(torch::kCUDA)));
-//             vt.push_back(torch::zeros_like(param, torch::device(torch::kCUDA)));
-//         }
-//         }
-//         t += 1;
-//         // std::cout << "iter: " << t << std::endl;
+    for (int global_idx = thread_idx; global_idx < tot_num_elems; global_idx += stride_x) {
+        int tensor_idx = num_params - 1;
+
+        #pragma unroll
+        for (int j = 0; j < num_params; j++)
+        {
+            /* code */
+            if (global_idx < tis[j].start_idx) { // iterate until g_idx < start_idx
+                tensor_idx = j - 1;
+                break;
+            }
+        }
+        // if (tensor_idx >= num_params) break;
+
+        TensorInfo* ti = &tis[tensor_idx];
+        int local_idx = global_idx - ti->start_idx;
+        // if (local_idx >= ti->size) break;
+
+        // if (ti->weight_decay != 0.0) ti->grad_addr[local_idx] += ti->weight_decay * ti->param_addr[local_idx];
+
+        ti->m_addr[local_idx] = ti->beta_1 * ti->m_addr[local_idx] + (1 - ti->beta_1) * ti->grad_addr[local_idx];
+        ti->v_addr[local_idx] = ti->beta_2 * ti->v_addr[local_idx] + (1 - ti->beta_2) * ti->grad_addr[local_idx] * ti->grad_addr[local_idx];
+        float mt_hat = ti->m_addr[local_idx] / (1 - pow(ti->beta_1, step));
+        float vt_hat = ti->v_addr[local_idx] / (1 - pow(ti->beta_2, step));
+        ti->param_addr[local_idx] -= ti->lr * mt_hat / (sqrtf(vt_hat) + ti->epsilon);
+    }
+}
 
 
-//         for (int i = 0; i < params.size(); i++) {
-//             torch::Tensor& pp = params[i];
-//             torch::Tensor grad = pp.grad();
-//             torch::Tensor& m = mt[i];
-//             torch::Tensor& v = vt[i];
-//             const auto total_elements = pp.numel();
 
-//             int num_threads = ONE_DIM_BLOCK_SIZE;
-//             int num_blocks = (total_elements + ONE_DIM_BLOCK_SIZE - 1) / ONE_DIM_BLOCK_SIZE;
-//             op_adam_kernel<<<num_blocks, num_threads>>>(
-//                 pp.contiguous().data<float>(),
-//                 grad.contiguous().data<float>(),
-//                 pp.contiguous().data<float>(),
-//                 m.contiguous().data<float>(), 
-//                 v.contiguous().data<float>(), 
-//                 lr, beta_1, beta_2, epsilon, lambda, t, total_elements);
-//         }
-//         // std::cout << mt[0]->str() << std::endl;
-//         // std::cout << vt[0]->str() << std::endl;
+// std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+void
+FuseAdamStepCUDAMultiTensor(
+	std::vector<torch::Tensor> pp,
+	std::vector<torch::Tensor> grad,
+	std::vector<torch::Tensor> m,
+	std::vector<torch::Tensor> v,
+	int step,
+    std::vector<float> lr,
+    std::vector<float> beta_1,
+    std::vector<float> beta_2,
+    std::vector<float> epsilon,
+    std::vector<float> weight_decay) {
 
-//     } 
-// };
+    int num_params = pp.size();
+    int tot_num_elems = 0;
+    TensorInfo* tis = new TensorInfo[num_params];
+
+    for (int i = 0; i < num_params; i++) {
+        tis[i].param_addr = pp[i].data<float>();
+        tis[i].grad_addr = grad[i].data<float>();
+        tis[i].m_addr = m[i].data<float>();
+        tis[i].v_addr = v[i].data<float>();
+        tis[i].lr = lr[i];
+        tis[i].beta_1 = beta_1[i];
+        tis[i].beta_2 = beta_2[i];
+        tis[i].epsilon = epsilon[i];
+        tis[i].weight_decay = weight_decay[i];
+        tis[i].start_idx = tot_num_elems;
+        tis[i].size = pp[i].numel();
+        tot_num_elems += tis[i].size;
+    }
+    // std::cout << "tot_num_elems: " << tot_num_elems << std::endl;
+    // std::cout << "num_params: " << num_params << std::endl;
+    TensorInfo* tis_dev = nullptr;
+    cudaError_t status;
+
+    // Allocate GPU memory
+    status = cudaMalloc((void**)&tis_dev, num_params * sizeof(TensorInfo));
+    if (status != cudaSuccess) {
+        fprintf(stderr, "CUDA malloc failed: %s\n", cudaGetErrorString(status));
+    }
+    // Copy data from host vector to device
+    status = cudaMemcpy(tis_dev, tis, num_params * sizeof(TensorInfo), cudaMemcpyHostToDevice);
+    if (status != cudaSuccess) {
+        fprintf(stderr, "CUDA memcpy failed: %s\n", cudaGetErrorString(status));
+    }
+
+    int num_threads = ONE_DIM_BLOCK_SIZE;
+    int num_blocks = (tot_num_elems + ONE_DIM_BLOCK_SIZE - 1) / num_threads;
+
+    op_adam_multi_tensor_kernel<<<num_blocks, num_threads>>>(tis_dev, step, num_params, tot_num_elems);
+
+
+    cudaError_t error = cudaDeviceSynchronize();
+    if (error != cudaSuccess) {
+        fprintf(stderr, "CUDA error: %s\n", cudaGetErrorString(error));
+    }
+    cudaFree(tis_dev);
+    delete[] tis;
+    tis = nullptr;
+	return;
+}

@@ -12,31 +12,45 @@ torch.cuda.manual_seed_all(42)
 class SimpleNet(nn.Module):
     def __init__(self):
         super(SimpleNet, self).__init__()
-        self.fc1 = nn.Linear(10000, 20)
+        self.fc1 = nn.Linear(1000, 200)
         self.relu = nn.ReLU()
-        self.fc2 = nn.Linear(20, 1)
+        self.fc2 = nn.Linear(200, 200)
+        self.fc3 = nn.Linear(200, 200)
+        self.fc4 = nn.Linear(200, 200)
+        self.fc5 = nn.Linear(200, 200)
+        self.fc6 = nn.Linear(200, 1)
 
     def forward(self, x):
         x = self.fc1(x)
         x = self.relu(x)
         x = self.fc2(x)
+        x = self.relu(x)
+        x = self.fc3(x)
+        x = self.relu(x)
+        x = self.fc4(x)
+        x = self.relu(x)
+        x = self.fc5(x)
+        x = self.relu(x)
+        x = self.fc6(x)
         return x
 
 model = SimpleNet().to("cuda:0")
-print("################ Test Fused Adam #################")
-optimizer = FusedAdam(model.parameters(), lr=0.01, beta_1=0.9, beta_2=0.999, epsilon=1e-08, weight_decay=0.0)
-# print("################ Test Pytorch Adam #################")
-# optimizer = torch.optim.Adam(model.parameters(), lr=0.01, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.0)
+# print("################ Test Fused Adam : Single tensor #################")
+# optimizer = FusedAdam(model.parameters(), lr=0.0001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, weight_decay=0.0, multi_tensor=True)
+# print("################ Test Fused Adam : Multi tensor #################")
+# optimizer = FusedAdam(model.parameters(), lr=0.0001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, weight_decay=0.0, multi_tensor=True)
+print("################ Test Pytorch Adam #################")
+optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.0)
 
 
 criterion = nn.MSELoss()
 
 torch.set_printoptions(precision=10)
-x = torch.randn(100, 10000).to("cuda:0")
+x = torch.randn(100, 1000).to("cuda:0")
 y = torch.randn(100, 1).to("cuda:0")
 
 total_time = 0
-epochs = 1
+epochs = 20
 for epoch in range(epochs):
     optimizer.zero_grad()
     outputs = model(x)
