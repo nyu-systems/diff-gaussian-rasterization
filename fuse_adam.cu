@@ -1,5 +1,6 @@
 #pragma once
 #include "fuse_adam.h"
+// #include <cuda_profiler_api.h>
 
 // gt = dt + lambda * t
 // mt = beta_1 * mt + (1 - beta_1) * gt
@@ -51,12 +52,8 @@ FuseAdamStepCUDA(
 
     torch::Tensor out = torch::zeros_like(pp);
 
-    // pp = pp.to(torch::kCUDA);
-    // grad = grad.to(torch::kCUDA);
-    // m = m.to(torch::kCUDA);
-    // v = v.to(torch::kCUDA);
-    // out = out.to(torch::kCUDA);
-
+    // NCU Test
+    // cudaProfilerStart();
     op_adam_kernel<<<num_blocks, num_threads>>>(
         pp.contiguous().data<float>(),
         grad.contiguous().data<float>(),
@@ -64,15 +61,12 @@ FuseAdamStepCUDA(
         v.contiguous().data<float>(), 
         out.contiguous().data<float>(), 
         lr, beta_1, beta_2, epsilon, weight_decay, t, total_elements);
-
+    // cudaProfilerStop();
+    
     cudaError_t error = cudaDeviceSynchronize();
     if (error != cudaSuccess) {
         fprintf(stderr, "CUDA error: %s\n", cudaGetErrorString(error));
     }
-    // pp = pp.to(torch::kCPU);
-    // m = m.to(torch::kCPU);
-    // v = v.to(torch::kCPU);
-    // out = out.to(torch::kCPU);
 
 	return std::make_tuple(out, m, v);
 }

@@ -2,6 +2,7 @@ import torch
 import time
 import torch.nn as nn
 from diff_gaussian_rasterization import FusedAdam
+# import torch.cuda.profiler as profiler
 
 torch.manual_seed(42)
 torch.cuda.manual_seed(42)
@@ -22,10 +23,10 @@ class SimpleNet(nn.Module):
         return x
 
 model = SimpleNet().to("cuda:0")
-# print("################ Test Fused Adam #################")
-# optimizer = FusedAdam(model.parameters(), lr=0.01, beta_1=0.9, beta_2=0.999, epsilon=1e-08, weight_decay=0.0)
-print("################ Test Pytorch Adam #################")
-optimizer = torch.optim.Adam(model.parameters(), lr=0.01, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.0)
+print("################ Test Fused Adam #################")
+optimizer = FusedAdam(model.parameters(), lr=0.01, beta_1=0.9, beta_2=0.999, epsilon=1e-08, weight_decay=0.0)
+# print("################ Test Pytorch Adam #################")
+# optimizer = torch.optim.Adam(model.parameters(), lr=0.01, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.0)
 
 
 criterion = nn.MSELoss()
@@ -35,8 +36,8 @@ x = torch.randn(100, 10000).to("cuda:0")
 y = torch.randn(100, 1).to("cuda:0")
 
 total_time = 0
-epochs = 20
-for epoch in range(20):
+epochs = 1
+for epoch in range(epochs):
     optimizer.zero_grad()
     outputs = model(x)
     loss = criterion(outputs, y)
@@ -45,6 +46,10 @@ for epoch in range(20):
     optimizer.step()
     t2 = time.time()
     total_time += (t2 - t1)
-
     print(f"Epoch {epoch+1}, Loss: {loss.item()}")
+
 print(f"Adam optimizer AVG time: {total_time/epochs}")
+
+
+# Test Scipts:
+# ncu --profile-from-start off  --metrics gpu__time_duration.sum,dram__bytes.sum --kernel-name op_adam_kernel --target-processes all  python diff_gaussian_rasterization/test_fuse_adam.py
