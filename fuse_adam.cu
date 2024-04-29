@@ -1,6 +1,7 @@
 #pragma once
 #include <vector>
 #include "fuse_adam.h"
+// #include <cuda_profiler_api.h>
 
 // gt = dt + lambda * t
 // mt = beta_1 * mt + (1 - beta_1) * gt
@@ -11,7 +12,7 @@
 // out = t - lr * mt_hat / (sqrt(vt_hat) + epsilon)
 
 template <typename T>
-__global__ void op_adam_single_tensor_kernel(T* t, T* dt, T* mt, T* vt, T* out,
+__global__ void op_adam_single_tensor_kernel(T* t, T* dt, T* mt, T* vt,
             float lr, float beta_1, float beta_2, float epsilon, float lambda, int step, int total_elements)
 {
 
@@ -26,13 +27,12 @@ __global__ void op_adam_single_tensor_kernel(T* t, T* dt, T* mt, T* vt, T* out,
         // mt[i] /= (1 - pow(beta_1, step));
         float vt_hat = vt[i] / (1 - powf(beta_2, step));
         // vt[i] /= (1 - pow(beta_2, step));
-        out[i] = t[i] - lr * mt_hat / (sqrtf(vt_hat) + epsilon);
+        t[i] = t[i] - lr * mt_hat / (sqrtf(vt_hat) + epsilon);
     }
 }
 
 
-
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+void
 FuseAdamStepCUDASingleTensor(
 	torch::Tensor& pp,
 	torch::Tensor& grad,
@@ -49,7 +49,6 @@ FuseAdamStepCUDASingleTensor(
     int num_threads = ONE_DIM_BLOCK_SIZE;
     int num_blocks = (total_elements + ONE_DIM_BLOCK_SIZE - 1) / ONE_DIM_BLOCK_SIZE;
 
-    torch::Tensor out = torch::zeros_like(pp);
 
     // NCU Test
     // cudaProfilerStart();
@@ -58,7 +57,6 @@ FuseAdamStepCUDASingleTensor(
         grad.contiguous().data<float>(),
         m.contiguous().data<float>(), 
         v.contiguous().data<float>(), 
-        out.contiguous().data<float>(), 
         lr, beta_1, beta_2, epsilon, weight_decay, t, total_elements);
     // cudaProfilerStop();
     
@@ -67,7 +65,7 @@ FuseAdamStepCUDASingleTensor(
         fprintf(stderr, "CUDA error: %s\n", cudaGetErrorString(error));
     }
 
-	return std::make_tuple(out, m, v);
+	return;
 }
 
 __global__ void op_adam_multi_tensor_kernel(TensorInfo* tis, int step, int num_params, int tot_num_elems)

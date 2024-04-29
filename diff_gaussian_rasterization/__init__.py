@@ -529,15 +529,9 @@ class FusedAdam(torch.optim.Optimizer):
                 beta_1, beta_2 = group['beta_1'], group['beta_2']
 
                 state['step'] += 1
-                pp, mt, vt = _C.fuse_adam_step_single_tensor(
-                    p, grad, exp_avg, exp_avg_sq, state['step'], 
+                _C.fuse_adam_step_single_tensor(
+                    p.data, grad.data, exp_avg.data, exp_avg_sq.data, state['step'], 
                     lr, beta_1, beta_2, epsilon, weight_decay)
-                # print((pp - p).norm())
-                # assert((pp - p).norm() > 0), f"{(pp - p).norm()}"
-                # print(mt)
-                p.data = pp.data
-                exp_avg.data = mt.data
-                exp_avg_sq.data = vt.data
 
 
     def _step_multi_tensor(self):

@@ -4,7 +4,7 @@
 #define ONE_DIM_BLOCK_SIZE 256
 
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+void
 FuseAdamStepCUDASingleTensor(
 	torch::Tensor& pp,
 	torch::Tensor& grad,
