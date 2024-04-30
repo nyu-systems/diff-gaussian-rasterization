@@ -101,6 +101,11 @@ class _PreprocessGaussians(torch.autograd.Function):
         raster_settings = ctx.raster_settings
         cuda_args = ctx.cuda_args
         means3D, scales, rotations, sh, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped = ctx.saved_tensors
+        # print(str(cuda_args["local_rank"])+"startpreprocessbackward"+str(cuda_args["iteration"]), flush=True)
+        if "more_sync" in cuda_args and cuda_args["more_sync"]:
+            # print(-1)
+            torch.cuda.synchronize() # HACK: sync after gaussian all2all backward.
+        # print(str(cuda_args["local_rank"])+"preprocessbackwardaftersync"+str(cuda_args["iteration"]), flush=True)
 
         # change dL_dmeans2D from (P, 2) to (P, 3)
         # grad_means2D is (P, 2) now. Need to pad it to (P, 3) because preprocess_gaussians_backward's cuda implementation.
@@ -132,6 +137,8 @@ class _PreprocessGaussians(torch.autograd.Function):
                 cuda_args)
 
         dL_dmeans3D, dL_dscales, dL_drotations, dL_dsh, dL_dopacity = _C.preprocess_gaussians_backward(*args)
+
+        # print(str(cuda_args["local_rank"])+"endpreprocessbackward"+str(cuda_args["iteration"]), flush=True)
 
         grads = (
             dL_dmeans3D.contiguous(),
@@ -234,13 +241,15 @@ class _RenderGaussians(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_color, grad_n_render, grad_n_consider, grad_n_contrib):
         # grad_n_render, grad_n_consider, grad_n_contrib should be all None. 
-
         # Restore necessary values from context
         num_rendered = ctx.num_rendered
         raster_settings = ctx.raster_settings
         cuda_args = ctx.cuda_args
         # render_forward_start_time = ctx.render_forward_start_time
         means2D, conic_opacity, rgb, geomBuffer, binningBuffer, imgBuffer, compute_locally, extended_compute_locally = ctx.saved_tensors
+        # print(str(cuda_args["local_rank"])+"startrenderbackward"+str(cuda_args["iteration"]), flush=True)
+
+        # torch.cuda.synchronize() # HACK: sync after pixel all2all backward.
 
         # Restructure args as C++ method expects them
         args = (raster_settings.bg,
@@ -258,6 +267,7 @@ class _RenderGaussians(torch.autograd.Function):
 
         dL_dmeans2D, dL_dconic_opacity, dL_dcolors = _C.render_gaussians_backward(*args)
 
+        # print(str(cuda_args["local_rank"])+"endrenderbackward"+str(cuda_args["iteration"]), flush=True)
         # Used when cuda_args["avoid_pixel_all2all"] is True.
         # torch.cuda.synchronize()
         # render_backward_end_time = time.time()
