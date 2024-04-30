@@ -26,8 +26,8 @@ class SimpleNet(nn.Module):
 
 def main():
     parser = argparse.ArgumentParser(description='Select an optimizer.')
-    parser.add_argument('--optimizer', choices=['fused_single', 'fused_multi', 'torch_adam'], required=True,
-                        help='Select the optimizer: "fused_single" for FusedAdam single tensor, "fused_multi" for FusedAdam multi tensor, or "torch_adam" for PyTorch Adam.')
+    parser.add_argument('--optimizer', choices=['fused_single', 'fused_multi', 'torch_adam', 'torch_adam_fused'], required=True,
+                        help='Select the optimizer: "fused_single" for FusedAdam single tensor, "fused_multi" for FusedAdam multi tensor, "torch_adam" for PyTorch Adam, or "torch_adam_fused" for PyTorch FusedAdam.')
     args = parser.parse_args()
 
     model = SimpleNet().to("cuda:0")
@@ -41,7 +41,9 @@ def main():
     elif args.optimizer == 'torch_adam':
         print("################ Test Pytorch Adam #################")
         optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.0)
-
+    elif args.optimizer == 'torch_adam_fused': 
+        print("################ Test Pytorch Adam #################")
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.0, fused=True)
     criterion = nn.MSELoss()
 
     torch.set_printoptions(precision=10)
@@ -49,7 +51,7 @@ def main():
     y = torch.randn(100, 1).to("cuda:0")
 
     total_time = 0
-    epochs = 1
+    epochs = 10
     for epoch in range(epochs):
         optimizer.zero_grad()
         outputs = model(x)
@@ -63,7 +65,7 @@ def main():
         total_time += (t2 - t1)
         print(f"Epoch {epoch+1}, Loss: {loss.item()}")
 
-    print(f"Adam optimizer AVG time: {total_time/epochs}")
+    print(f"Adam optimizer AVG time: {(total_time/epochs)*1000} ms")
 
 if __name__ == "__main__":
     main()
