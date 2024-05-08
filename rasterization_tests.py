@@ -1,5 +1,4 @@
 import math
-import time
 
 import torch
 
@@ -9,8 +8,8 @@ from diff_gaussian_rasterization import (
     GaussianRasterizerBatches,
 )
 
-num_gaussians = 20000
-num_batches=32
+num_gaussians = 1000000
+num_batches=64
 means3D = torch.randn(num_gaussians, 3).cuda()
 scales = torch.randn(num_gaussians, 3).cuda()
 rotations = torch.randn(num_gaussians, 4).cuda()
