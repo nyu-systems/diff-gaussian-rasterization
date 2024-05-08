@@ -472,8 +472,8 @@ int CudaRasterizer::Rasterizer::preprocessForwardBatches(
 	// In sep_rendering==True case, we will compute tiles_touched in the renderForward. 
 	// TODO: remove it later by modifying FORWARD::preprocess when we deprecate sep_rendering==False case
 	uint32_t* tiles_touched_temp_buffer;
-	CHECK_CUDA(cudaMalloc(&tiles_touched_temp_buffer, P * sizeof(uint32_t)), debug);
-	CHECK_CUDA(cudaMemset(tiles_touched_temp_buffer, 0, P * sizeof(uint32_t)), debug);
+	CHECK_CUDA(cudaMalloc(&tiles_touched_temp_buffer, num_viewpoints * P * sizeof(uint32_t)), debug);
+	CHECK_CUDA(cudaMemset(tiles_touched_temp_buffer, 0, num_viewpoints * P * sizeof(uint32_t)), debug);
 
 	timer.start("10 preprocess");
 	// Run preprocessing per-Gaussian (transformation, bounding, conversion of SHs to RGB)
