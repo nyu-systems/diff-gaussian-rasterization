@@ -9,7 +9,7 @@ from diff_gaussian_rasterization import (
     GaussianRasterizerBatches,
 )
 
-num_gaussians = 10000
+num_gaussians = 20000
 num_batches=32
 means3D = torch.randn(num_gaussians, 3).cuda()
 scales = torch.randn(num_gaussians, 3).cuda()
@@ -73,8 +73,10 @@ def test_batched_gaussian_rasterizer():
     batched_depths=[]
     batched_rgb=[]
 
-    start_time = time.time()
-    
+    start_event = torch.cuda.Event(enable_timing=True)
+    end_event = torch.cuda.Event(enable_timing=True)
+    torch.cuda.synchronize()
+    start_event.record()
     for i, (viewpoint_camera, strategy) in enumerate(zip(batched_viewpoint_cameras, batched_strategies)):
         ########## [START] Prepare CUDA Rasterization Settings ##########
         cuda_args = get_cuda_args(strategy, mode)
@@ -124,9 +126,10 @@ def test_batched_gaussian_rasterizer():
         batched_depths.append(depths)
 
 
-    end_time = time.time()
-    preprocess_time = end_time - start_time
-    print(f"Time taken by test_batched_gaussian_rasterizer: {preprocess_time:.4f} seconds")
+    end_event.record()
+    torch.cuda.synchronize()
+    elapsed_time_ms = start_event.elapsed_time(end_event)
+    print(f"Time taken by test_batched_gaussian_rasterizer: {elapsed_time_ms:.4f} ms")
     # Perform further operations with the batched results
     # Test results and performance
    
@@ -141,7 +144,10 @@ def test_batched_gaussian_rasterizer():
     
 def test_batched_gaussian_rasterizer_batch_processing():
     # Set up the input data
-    start_time = time.time()
+    start_event = torch.cuda.Event(enable_timing=True)
+    end_event = torch.cuda.Event(enable_timing=True)
+    torch.cuda.synchronize()  # Wait for the events to be recorded!
+    start_event.record()
     # Set up the viewpoint cameras
     batched_viewpoint_cameras = []
     for _ in range(num_batches):
@@ -205,9 +211,10 @@ def test_batched_gaussian_rasterizer_batch_processing():
         opacities=opacity,
         batched_cuda_args=batched_cuda_args[0]  #TODO: look into sending list of cuda_args/strategies
     )
-    end_time = time.time()
-    preprocess_time = end_time - start_time
-    print(f"Time taken by test_batched_gaussian_rasterizer_batch_processing: {preprocess_time:.4f} seconds")
+    end_event.record()
+    torch.cuda.synchronize()  # Wait for the events to be recorded!
+    elapsed_time_ms = start_event.elapsed_time(end_event)
+    print(f"Time taken by test_batched_gaussian_rasterizer_batch_processing: {elapsed_time_ms:.4f} ms")
 
     # TODO: make the below work
     # if mode == "train":
