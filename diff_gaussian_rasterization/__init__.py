@@ -545,33 +545,35 @@ class FusedAdam(torch.optim.Optimizer):
         beta_2_list = []
         eps_list = []
         weight_decay_list = []
-        param_start_list = []
-        idx = 0
+        tensor_to_group = []
+        group_idx = 0
+        tot_num_elems = 0
         step = 0
 
         for group in self.param_groups:
-            # print(group['params'][-1])
+            lr = group['lr']
+            beta_1, beta_2 = group['beta_1'], group['beta_2']
+            epsilon = group['epsilon']
+            weight_decay = group['weight_decay']
+
+            lr_list.append(lr)
+            beta_1_list.append(beta_1)
+            beta_2_list.append(beta_2)
+            eps_list.append(epsilon)
+            weight_decay_list.append(weight_decay)
+            
             for p in group['params']:
                 if p.grad is None:
                     continue
 
                 state = self.state[p]
 
-                # print("state len: ", len(state))
-                # State initialization
                 if len(state) == 0:
                     state['step'] = 0
-                    # Exponential moving averages of gradient
                     state['exp_avg'] = torch.zeros_like(p.data, dtype=p.dtype, device=p.device)
-                    # Exponential moving average of squared gradient
                     state['exp_avg_sq'] = torch.zeros_like(p.data, dtype=p.dtype, device=p.device)
 
-                lr = group['lr']
-                epsilon = group['epsilon']
-                weight_decay = group['weight_decay']
-
                 exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
-                beta_1, beta_2 = group['beta_1'], group['beta_2']
 
                 state['step'] += 1
 
@@ -579,32 +581,15 @@ class FusedAdam(torch.optim.Optimizer):
                 grad_list.append(p.grad.contiguous())
                 exp_avg_list.append(exp_avg.data.contiguous())
                 exp_avg_sq_list.append(exp_avg_sq.data.contiguous())
-                lr_list.append(lr)
-                beta_1_list.append(beta_1)
-                beta_2_list.append(beta_2)
-                eps_list.append(epsilon)
-                weight_decay_list.append(weight_decay)
-
-                param_start_list.append(idx)
-                idx += p.numel()
                 step = state['step']
 
-        param_start_list.append(idx)
+                tot_num_elems += p.numel()
+                tensor_to_group.append(group_idx)
 
-        # pp = torch.concat(param_list)
-        # grad = torch.concat(grad_list)
-        # mt = torch.concat(exp_avg_list)
-        # vt = torch.concat(exp_avg_sq_list)
-        # print(grad.shape, grad.dtype)
+            group_idx += 1
 
         _C.fuse_adam_step_multi_tensor(
-            param_list, grad_list, exp_avg_list, exp_avg_sq_list, step, 
+            [param_list, grad_list, exp_avg_list, exp_avg_sq_list], step, 
             lr_list, beta_1_list, beta_2_list, 
-            eps_list, weight_decay_list)
-
-        # for i in range(len(param_list)):
-        #     param_list[i].data = pp[param_start_list[i]:param_start_list[i+1]]
-        #     exp_avg_list[i].data = mt[param_start_list[i]:param_start_list[i+1]]
-        #     exp_avg_sq_list[i].data = vt[param_start_list[i]:param_start_list[i+1]]
-
+            eps_list, weight_decay_list, tensor_to_group, tot_num_elems, 4096*4096)
 
