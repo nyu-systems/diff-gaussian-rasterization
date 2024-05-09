@@ -30,7 +30,7 @@ def main():
                         help='Select the optimizer: "fused_single" for FusedAdam single tensor, "fused_multi" for FusedAdam multi tensor, "torch_adam" for PyTorch Adam, or "torch_adam_fused" for PyTorch FusedAdam.')
     parser.add_argument('--hidden_size', choices=['10', '100', '1000', '10000'], default='1000',
                         help='hidden size of the MLP')
-   
+    parser.add_argument('--test_groups', action="store_true", help='Choice of whether test with parameters with multiple groups')
     args = parser.parse_args()
 
     hidden_size = eval(args.hidden_size)
@@ -40,18 +40,22 @@ def main():
     lrs = {10:1e-1, 100:1e-2, 1000: 1e-4, 10000:1e-5}
     lr = lrs[hidden_size]
     
+    params_groups = model.parameters()
+    if (args.test_groups):
+        params_groups = [{'params': p} for p in model.parameters()]
+
     if args.optimizer == 'fused_single':
         print("################ Test Fused Adam : Single tensor #################")
-        optimizer = FusedAdam(model.parameters(), lr=lr, beta_1=0.9, beta_2=0.999, epsilon=1e-08, weight_decay=0.0, multi_tensor=False)
+        optimizer = FusedAdam(params_groups, lr=lr, beta_1=0.9, beta_2=0.999, epsilon=1e-08, weight_decay=0.0, multi_tensor=False)
     elif args.optimizer == 'fused_multi':
         print("################ Test Fused Adam : Multi tensor #################")
-        optimizer = FusedAdam(model.parameters(), lr=lr, beta_1=0.9, beta_2=0.999, epsilon=1e-08, weight_decay=0.0, multi_tensor=True)
+        optimizer = FusedAdam(params_groups, lr=lr, beta_1=0.9, beta_2=0.999, epsilon=1e-08, weight_decay=0.0, multi_tensor=True)
     elif args.optimizer == 'torch_adam':
         print("################ Test Pytorch Adam #################")
-        optimizer = torch.optim.Adam(model.parameters(), lr=lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.0)
+        optimizer = torch.optim.Adam(params_groups, lr=lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.0)
     elif args.optimizer == 'torch_adam_fused': 
         print("################ Test Pytorch Adam #################")
-        optimizer = torch.optim.Adam(model.parameters(), lr=lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.0, fused=True)
+        optimizer = torch.optim.Adam(params_groups, lr=lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.0, fused=True)
 
     print(f"####### Hyper parameters: hidden size: {hidden_size}, lr: {lr}")
 

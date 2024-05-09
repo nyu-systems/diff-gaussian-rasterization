@@ -5,7 +5,7 @@
 
 #define MAX_NUM_BLOCK 320
 #define MAX_NUM_PARAMS_PER_CHUNK 64
-#define ILP 4
+#define ILP 4 // ILP=4 cause minor error
 
 void
 FuseAdamStepCUDASingleTensor(

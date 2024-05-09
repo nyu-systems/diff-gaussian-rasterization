@@ -105,15 +105,20 @@ __global__ void op_adam_multi_tensor_kernel(TensorInfo tis, int step, int num_pa
     int stride_x = blockDim.x * gridDim.x;
     
     for (int idx = thread_idx; idx < tot_num_elems; idx += stride_x*ILP) {
-        int r_i[ILP] = {num_params - 1}; // tensor idx in tensorInfo list
+        int param_idx[ILP]; // tensor idx in tensorInfo list
+
+        #pragma unroll
+        for (int ii = 0; ii < ILP; ii++) {
+            param_idx[ii] = num_params - 1;
+        }
+
         int ii_idx = 0;                // idx within ILP
         int global_idx = idx;
-
         int j = 0;
         // #pragma unroll
         while(j < num_params){ // iterate until g_idx < start_idx
             if (global_idx < tis.start_idx[j]) {
-                r_i[ii_idx] = j - 1;
+                param_idx[ii_idx] = j - 1;
                 ii_idx += 1;
 
                 if (ii_idx >= ILP) break;
@@ -136,17 +141,17 @@ __global__ void op_adam_multi_tensor_kernel(TensorInfo tis, int step, int num_pa
 
         #pragma unroll
         for(int ii = 0; ii < ILP; ii++) {
-            int i = idx + stride_x*ii - tis.start_idx[r_i[ii]];
-            if(i < tis.size[r_i[ii]]){
-                r_p[ii] = tis.param_addr[r_i[ii]][i];
-                r_g[ii] = tis.grad_addr[r_i[ii]][i];
-                r_m[ii] = tis.m_addr[r_i[ii]][i];
-                r_v[ii] = tis.v_addr[r_i[ii]][i];
-                r_l[ii] = tis.lr[r_i[ii]];
-                r_b1[ii] = tis.beta_1[r_i[ii]];
-                r_b2[ii] = tis.beta_2[r_i[ii]];
-                r_e[ii] = tis.epsilon[r_i[ii]];
-                r_w[ii] = tis.weight_decay[r_i[ii]];
+            int i = idx + stride_x*ii - tis.start_idx[param_idx[ii]];
+            if(i < tis.size[param_idx[ii]]){
+                r_p[ii] = tis.param_addr[param_idx[ii]][i];
+                r_g[ii] = tis.grad_addr[param_idx[ii]][i];
+                r_m[ii] = tis.m_addr[param_idx[ii]][i];
+                r_v[ii] = tis.v_addr[param_idx[ii]][i];
+                r_l[ii] = tis.lr[param_idx[ii]];
+                r_b1[ii] = tis.beta_1[param_idx[ii]];
+                r_b2[ii] = tis.beta_2[param_idx[ii]];
+                r_e[ii] = tis.epsilon[param_idx[ii]];
+                r_w[ii] = tis.weight_decay[param_idx[ii]];
             } 
             else {
                 r_g[ii] = 0.0;
@@ -173,11 +178,11 @@ __global__ void op_adam_multi_tensor_kernel(TensorInfo tis, int step, int num_pa
         #pragma unroll
         for(int ii = 0; ii < ILP; ii++)
         {
-            int i = idx + stride_x*ii - tis.start_idx[r_i[ii]];
-            if(i < tis.size[r_i[ii]]) {
-                tis.param_addr[r_i[ii]][i]= r_p[ii];
-                tis.m_addr[r_i[ii]][i] = r_m[ii];
-                tis.v_addr[r_i[ii]][i] = r_v[ii];
+            int i = idx + stride_x*ii - tis.start_idx[param_idx[ii]];
+            if(i < tis.size[param_idx[ii]]) {
+                tis.param_addr[param_idx[ii]][i]= r_p[ii];
+                tis.m_addr[param_idx[ii]][i] = r_m[ii];
+                tis.v_addr[param_idx[ii]][i] = r_v[ii];
             }
         }
     }
@@ -216,7 +221,7 @@ FuseAdamStepCUDAMultiTensor(
 
     for (int chunk = 0; chunk < tot_num_chunks; chunk++) {
         for (int t = param_idx; t < min(param_idx + MAX_NUM_PARAMS_PER_CHUNK, num_params); t++) {
-            long tensor_length = tensor_list[0][param_idx].numel();
+            long tensor_length = tensor_list[0][t].numel();
 
             tis.param_addr[param_idx_in_chunk] = pp[t].data<float>() + param_offset;
             tis.grad_addr[param_idx_in_chunk] = grad[t].data<float>() + param_offset;
@@ -234,9 +239,10 @@ FuseAdamStepCUDAMultiTensor(
                 param_offset += ADAM_CHUNK_SIZE - chunk_length;
                 chunk_length = ADAM_CHUNK_SIZE;
                 param_idx_in_chunk += 1;
+                param_idx = t;
                 if (param_offset == tensor_length) {
                     param_offset = 0;
-                    param_idx += 1;
+                    param_idx = t + 1;
                 }
                 break;
             }
@@ -245,7 +251,8 @@ FuseAdamStepCUDAMultiTensor(
                 chunk_length += (int) (tensor_length - param_offset);
                 param_idx_in_chunk += 1;
                 param_offset = 0;
-                param_idx += 1;
+                param_idx = t + 1;
+                if (param_idx_in_chunk >= MAX_NUM_PARAMS_PER_CHUNK) break;
             }
         }
         // std::cout <<"chunk: " << chunk << ", chunk_length: " << chunk_length << ", param_idx_in_chunk: " << param_idx_in_chunk
@@ -260,12 +267,13 @@ FuseAdamStepCUDAMultiTensor(
         // int thread_idx = 320*512 - 1;
         // int stride_x = 320*512;
         // for (int idx = thread_idx; idx < chunk_length; idx += stride_x*ILP) {
-        //     int r_i[ILP] = {param_idx_in_chunk - 1}; // tensor idx in tensorInfo list
+        //     int r_i[ILP] = {param_idx_in_chunk - 1, param_idx_in_chunk - 1, param_idx_in_chunk - 1, param_idx_in_chunk - 1}; // tensor idx in tensorInfo list
         //     int ii_idx = 0;                // idx within ILP
         //     int global_idx = idx;
         //     int j = 0;
-        //     #pragma unroll
+        //     // #pragma unroll
         //     while(j < param_idx_in_chunk){
+        //         std::cout << "num_params: " << param_idx_in_chunk << ", global_idx: " << global_idx << ", start_idx: " <<  tis.start_idx[j] << std::endl;
         //         if (global_idx < tis.start_idx[j]) { // iterate until g_idx < start_idx
         //             r_i[ii_idx] = j - 1;
         //             ii_idx += 1;
@@ -278,7 +286,7 @@ FuseAdamStepCUDAMultiTensor(
         //         }
         //     }
         //     for (int ii = 0; ii < ILP; ii++) {
-        //         std::cout << ii << "-local_idx: " << idx + stride_x*ii - tis.start_idx[r_i[ii]] << ", start: " << tis.start_idx[r_i[ii]] << std::endl;
+        //         std::cout << ii << " tensor_idx: " << r_i[ii] << "-local_idx: " << idx + stride_x*ii - tis.start_idx[r_i[ii]] << ", start: " << tis.start_idx[r_i[ii]] << ", size: " << tis.size[r_i[ii]] << std::endl;
         //     }
         // }
         op_adam_multi_tensor_kernel<<<num_blocks, num_threads>>>(tis, step, param_idx_in_chunk, chunk_length);
