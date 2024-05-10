@@ -4,8 +4,8 @@
 #define ADAM_BLOCK_SIZE 512
 
 #define MAX_NUM_BLOCK 320
-#define MAX_NUM_PARAMS_PER_CHUNK 64
-#define ILP 4 // ILP=4 cause minor error
+#define MAX_NUM_PARAMS_PER_CHUNK 60 // 60 is max to ensure mem of args < 4KB
+#define ILP 4
 
 void
 FuseAdamStepCUDASingleTensor(
@@ -20,21 +20,7 @@ FuseAdamStepCUDASingleTensor(
 	float epsilon,
 	float weight_decay);
 
-// struct TensorInfo {
-//     float* param_addr;
-//     float* grad_addr;
-//     float* m_addr;
-//     float* v_addr;
-//     int size;
-//     int start_idx;
-//     float lr;
-//     float beta_1;
-//     float beta_2;
-//     float epsilon;
-//     float weight_decay;
-// };
-
-struct TensorInfo {                                               // Total ~17*4*64
+struct TensorInfo {                                               // Total: (6*8+5*4) * T ~ 68 * 60 = 4KB - 16
     float* param_addr[MAX_NUM_PARAMS_PER_CHUNK];
     float* grad_addr[MAX_NUM_PARAMS_PER_CHUNK];
     float* m_addr[MAX_NUM_PARAMS_PER_CHUNK];
@@ -47,19 +33,6 @@ struct TensorInfo {                                               // Total ~17*4
     float epsilon[MAX_NUM_PARAMS_PER_CHUNK];
     float weight_decay[MAX_NUM_PARAMS_PER_CHUNK];
 };
-
-
-// struct TensorMeta {                                                 // Total ~ 1440
-//     void* addrs[TENSOR_LIST_DEPTH][MAX_TENSOR_PER_LAUNCH];          // 8 * D * T ~ 1152
-//     int size[MAX_TENSOR_PER_LAUNCH];                                // 4 * T ~ 144
-//     unsigned char tensor_to_group[MAX_TENSOR_PER_LAUNCH];           // 2 * T ~ 64
-//     float lr[MAX_GROUP_PER_LAUNCH];                                 // 5 * 4 * G ~ 80
-//     float beta_1[MAX_GROUP_PER_LAUNCH];
-//     float beta_2[MAX_GROUP_PER_LAUNCH];
-//     float epsilon[MAX_GROUP_PER_LAUNCH];
-//     float weight_decay[MAX_GROUP_PER_LAUNCH];
-//     int block_to_chunk[MAX_NUM_BLOCKS];                             // 4 * 320 ~ 1280
-// };
 
 void
 FuseAdamStepCUDAMultiTensor(
