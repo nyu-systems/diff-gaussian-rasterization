@@ -49,6 +49,26 @@ PreprocessGaussiansCUDA(
 	const bool debug,
 	const pybind11::dict &args);
 
+std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+PreprocessGaussiansCUDABatches(
+	const torch::Tensor& means3D,
+	const torch::Tensor& scales,
+	const torch::Tensor& rotations,
+	const torch::Tensor& sh,
+    const torch::Tensor& opacity,//3dgs' parametes.
+	const float scale_modifier,
+	const torch::Tensor& viewmatrix,
+	const torch::Tensor& projmatrix,
+	const torch::Tensor& tan_fovx, 
+	const torch::Tensor& tan_fovy,
+    const int image_height,
+    const int image_width,
+	const int degree,
+	const torch::Tensor& campos,
+    const bool prefiltered,//raster_settings
+	const bool debug,
+	const pybind11::dict &args);
+
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
   PreprocessGaussiansBackwardCUDA(
 	const torch::Tensor& radii,

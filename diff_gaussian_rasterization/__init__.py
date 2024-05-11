@@ -10,10 +10,12 @@
 #
 
 from typing import NamedTuple
-import torch.nn as nn
+
 import torch
+import torch.nn as nn
+
 from . import _C
-import time
+
 
 def cpu_deep_copy_tuple(input_tuple):
     copied_tensors = [item.cpu().clone() if isinstance(item, torch.Tensor) else item for item in input_tuple]
@@ -31,7 +33,7 @@ def preprocess_gaussians(
     sh,
     opacities,
     raster_settings,
-    cuda_args,
+    cuda_args
 ):
     return _PreprocessGaussians.apply(
         means3D,
@@ -40,7 +42,7 @@ def preprocess_gaussians(
         sh,
         opacities,
         raster_settings,
-        cuda_args,
+        cuda_args
     )
 
 class _PreprocessGaussians(torch.autograd.Function):
@@ -53,10 +55,28 @@ class _PreprocessGaussians(torch.autograd.Function):
         sh,
         opacities,
         raster_settings,
-        cuda_args,
+        cuda_args
     ):
 
         # Restructure arguments the way that the C++ lib expects them
+        if isinstance(raster_settings, list):
+            viewmatrix, projmatrix, campos = [
+                torch.stack(tensors) for tensors in zip(
+                    *[(rs.viewmatrix, rs.projmatrix, rs.campos) for rs in raster_settings]
+                )
+            ]
+            tanfovx, tanfovy = [
+                torch.tensor(vals, device=means3D.device)
+                for vals in zip(*[(rs.tanfovx, rs.tanfovy) for rs in raster_settings])
+            ]
+            raster_settings = raster_settings[0]._replace(
+                tanfovx=tanfovx,
+                tanfovy=tanfovy,
+                viewmatrix=viewmatrix,
+                projmatrix=projmatrix,
+                campos=campos
+            )  
+                      
         args = (
             means3D,
             scales,
@@ -78,7 +98,10 @@ class _PreprocessGaussians(torch.autograd.Function):
         )
 
         # TODO: update this. 
-        num_rendered, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped = _C.preprocess_gaussians(*args)
+        if not torch.is_tensor(raster_settings.tanfovx):
+            num_rendered, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped = _C.preprocess_gaussians(*args)
+        else:
+            num_rendered, means2D, depths, radii, cov3D, conic_opacity, rgb, clamped = _C.preprocess_gaussians_batched(*args)
 
         # Keep relevant tensors for backward
         ctx.raster_settings = raster_settings
@@ -303,6 +326,33 @@ class GaussianRasterizationSettings(NamedTuple):
     campos : torch.Tensor
     prefiltered : bool
     debug : bool
+
+class GaussianRasterizerBatches(nn.Module):
+    def __init__(self, raster_settings_batch):
+        super().__init__()
+        self.raster_settings_batch = raster_settings_batch
+
+    def markVisible(self, positions):
+        # Mark visible points (based on frustum culling for camera) with a boolean 
+        with torch.no_grad():
+            visible = []
+            for raster_settings in self.raster_settings_batch:
+                viewmatrix = raster_settings.viewmatrix
+                projmatrix = raster_settings.projmatrix
+                visible.append(_C.mark_visible(positions, viewmatrix, projmatrix))
+        return visible
+
+    def preprocess_gaussians(self, means3D, scales, rotations, shs, opacities, batched_cuda_args=None):
+        # Invoke C++/CUDA rasterization routine
+        
+            return preprocess_gaussians(
+                means3D,
+                scales,
+                rotations,
+                shs,
+                opacities,
+                self.raster_settings_batch,
+                batched_cuda_args)
 
 class GaussianRasterizer(nn.Module):
     def __init__(self, raster_settings):

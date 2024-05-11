@@ -9,9 +9,11 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
-from setuptools import setup
-from torch.utils.cpp_extension import CUDAExtension, BuildExtension
 import os
+
+from setuptools import setup
+from torch.utils.cpp_extension import BuildExtension, CUDAExtension
+
 os.path.dirname(os.path.abspath(__file__))
 
 setup(

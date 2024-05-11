@@ -45,7 +45,35 @@ namespace FORWARD
 		float4* conic_opacity,
 		const dim3 grid,
 		uint32_t* tiles_touched,
-		bool prefiltered);
+		bool prefiltered
+    );
+
+    void preprocess_batch(int P, int D, int M,
+        const float* means3D,
+        const glm::vec3* scales,
+        const float scale_modifier,
+        const glm::vec4* rotations,
+        const float* opacities,
+        const float* shs,
+        bool* clamped,
+        const float* cov3D_precomp,
+        const float* colors_precomp,
+        const float* viewmatrix,
+        const float* projmatrix,
+        const glm::vec3* cam_pos,
+        const int W, int H,
+        const float* tan_fovx, const float* tan_fovy,
+        int* radii,
+        float2* means2D,
+        float* depths,
+        float* cov3Ds,
+        float* rgb,
+        float4* conic_opacity,
+        const dim3 grid,
+        uint32_t* tiles_touched,
+        bool prefiltered,
+        const int num_viewpoints
+    );
 
 	// Main rasterization method.
 	void render(
@@ -61,7 +89,8 @@ namespace FORWARD
 		uint32_t* n_contrib2loss,
         const int* compute_locally_1D_2D_map,
 		const float* bg_color,
-		float* out_color);
+		float* out_color
+    );
 }
 
 
