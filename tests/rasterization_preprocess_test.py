@@ -172,7 +172,7 @@ def run_batched_gaussian_rasterizer(setup_data):
     end_event.record()
     torch.cuda.synchronize()
     elapsed_time_ms = start_event.elapsed_time(end_event)
-    print(f"Time taken by test_batched_gaussian_rasterizer: {elapsed_time_ms:.4f} ms")
+    print(f"Time taken by run_batched_gaussian_rasterizer: {elapsed_time_ms:.4f} ms")
 
     batched_means2D = torch.stack(batched_means2D, dim=0)
     batched_radii = torch.stack(batched_radii, dim=0)
@@ -284,7 +284,7 @@ def run_batched_gaussian_rasterizer_batch_processing(setup_data):
     end_event.record()
     torch.cuda.synchronize()
     elapsed_time_ms = start_event.elapsed_time(end_event)
-    print(f"Time taken by test_batched_gaussian_rasterizer: {elapsed_time_ms:.4f} ms")
+    print(f"Time taken by run_batched_gaussian_rasterizer_batch_processing: {elapsed_time_ms:.4f} ms")
 
     # Perform assertions on the preprocessed data
 
