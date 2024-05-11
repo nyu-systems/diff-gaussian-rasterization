@@ -359,7 +359,10 @@ def compare_tensors(tensor1, tensor2):
     else:
         print("Tensors have non-matching values.")
         non_matching_indices = torch.where(equality_matrix == False)
-        for idx in zip(*non_matching_indices[:5]):
+        num_non_matching = non_matching_indices[0].shape[0]
+        max_indices_to_print = min(5, num_non_matching)
+        for i in range(max_indices_to_print):
+            idx = tuple(index[i] for index in non_matching_indices)
             value1 = tensor1[idx].item()
             value2 = tensor2[idx].item()
             print(f"Non-matching values at index {idx}: {value1} != {value2}")
