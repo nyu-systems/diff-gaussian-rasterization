@@ -67,8 +67,8 @@ def setup_data():
     )
 
 
-def compute_dummy_loss(means3D, scales, rotations, shs, opacity):
-    losses = [(tensor - torch.ones_like(tensor)).pow(2).mean() for tensor in [means3D, scales, rotations, shs, opacity]]
+def compute_dummy_loss(batched_means2D, batched_rgb, batched_conic_opacity):
+    losses = [(tensor - torch.ones_like(tensor)).pow(2).mean() for tensor in [batched_means2D, batched_conic_opacity, batched_rgb]]
     loss = sum(losses)
     return loss
 
@@ -186,7 +186,7 @@ def run_batched_gaussian_rasterizer(setup_data):
     torch.cuda.synchronize()
     start_backward_event.record()
     
-    loss = compute_dummy_loss(means3D, scales, rotations, shs, opacity)
+    loss = compute_dummy_loss(batched_means2D, batched_rgb, batched_conic_opacity)
     loss.backward()
     
     end_backward_event.record()
@@ -312,7 +312,7 @@ def run_batched_gaussian_rasterizer_batch_processing(setup_data):
     torch.cuda.synchronize()
     start_backward_event.record()
 
-    loss = compute_dummy_loss(means3D, scales, rotations, shs, opacity)
+    loss = compute_dummy_loss(batched_means2D, batched_rgb, batched_conic_opacity)
     loss.backward()
 
     end_backward_event.record()

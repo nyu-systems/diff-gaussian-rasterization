@@ -41,9 +41,9 @@ __device__ void computeColorFromSH(int point_idx, int result_idx, int deg, int m
 	float z = dir.z;
 
 	// Target location for this Gaussian to write SH gradients to
-	glm::vec3* dL_dsh = dL_dshs + point_idx * max_coeffs;
+    glm::vec3 *dL_dsh = dL_dshs + result_idx * max_coeffs;
 
-	// No tricks here, just high school-level calculus.
+    // No tricks here, just high school-level calculus.
 	float dRGBdsh0 = SH_C0;
 	dL_dsh[0] = dRGBdsh0 * dL_dRGB;
 	if (deg > 0)
@@ -55,7 +55,7 @@ __device__ void computeColorFromSH(int point_idx, int result_idx, int deg, int m
 		dL_dsh[2] = dRGBdsh2 * dL_dRGB;
 		dL_dsh[3] = dRGBdsh3 * dL_dRGB;
 
-		dRGBdx = -SH_C1 * sh[3];
+        dRGBdx = -SH_C1 * sh[3];
 		dRGBdy = -SH_C1 * sh[1];
 		dRGBdz = SH_C1 * sh[2];
 
@@ -75,7 +75,7 @@ __device__ void computeColorFromSH(int point_idx, int result_idx, int deg, int m
 			dL_dsh[7] = dRGBdsh7 * dL_dRGB;
 			dL_dsh[8] = dRGBdsh8 * dL_dRGB;
 
-			dRGBdx += SH_C2[0] * y * sh[4] + SH_C2[2] * 2.f * -x * sh[6] + SH_C2[3] * z * sh[7] + SH_C2[4] * 2.f * x * sh[8];
+            dRGBdx += SH_C2[0] * y * sh[4] + SH_C2[2] * 2.f * -x * sh[6] + SH_C2[3] * z * sh[7] + SH_C2[4] * 2.f * x * sh[8];
 			dRGBdy += SH_C2[0] * x * sh[4] + SH_C2[1] * z * sh[5] + SH_C2[2] * 2.f * -y * sh[6] + SH_C2[4] * 2.f * -y * sh[8];
 			dRGBdz += SH_C2[1] * y * sh[5] + SH_C2[2] * 2.f * 2.f * z * sh[6] + SH_C2[3] * x * sh[7];
 
@@ -96,7 +96,7 @@ __device__ void computeColorFromSH(int point_idx, int result_idx, int deg, int m
 				dL_dsh[14] = dRGBdsh14 * dL_dRGB;
 				dL_dsh[15] = dRGBdsh15 * dL_dRGB;
 
-				dRGBdx += (
+                dRGBdx += (
 					SH_C3[0] * sh[9] * 3.f * 2.f * xy +
 					SH_C3[1] * sh[10] * yz +
 					SH_C3[2] * sh[11] * -2.f * xy +
@@ -563,7 +563,6 @@ __global__ void preprocessCUDABatched(
     auto point_idx = blockIdx.x * blockDim.x + threadIdx.x;
     auto viewpoint_idx = blockIdx.y;
     if (viewpoint_idx >= num_viewpoints || point_idx >= P) return;
-        return;
 	
     auto idx = viewpoint_idx * P + point_idx;
 	if (!(radii[idx] > 0))

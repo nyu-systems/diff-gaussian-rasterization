@@ -129,8 +129,7 @@ class _PreprocessGaussians(torch.autograd.Function):
         # grad_means2D is (P, 2) now. Need to pad it to (P, 3) because preprocess_gaussians_backward's cuda implementation.
         
         grad_means2D_pad =  torch.zeros_like(grad_means2D[..., :1], dtype = grad_means2D.dtype, device=grad_means2D.device)
-        grad_means2D = torch.cat((grad_means2D, grad_means2D_pad), dim = 1).contiguous()
-
+        grad_means2D = torch.cat((grad_means2D, grad_means2D_pad), dim = -1).contiguous()
         # Restructure args as C++ method expects them
         args = (radii,
                 cov3D,
