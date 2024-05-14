@@ -17,6 +17,7 @@
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("mark_visible", &markVisible);
   m.def("preprocess_gaussians", &PreprocessGaussiansCUDA);
+  m.def("preprocess_gaussians_batched", &PreprocessGaussiansCUDABatches);
   m.def("preprocess_gaussians_backward", &PreprocessGaussiansBackwardCUDA);
   m.def("get_distribution_strategy", &GetDistributionStrategyCUDA);
   m.def("render_gaussians", &RenderGaussiansCUDA);
