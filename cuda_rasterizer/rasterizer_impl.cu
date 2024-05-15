@@ -370,59 +370,105 @@ __global__ void L1ReduceLossCUDA(
 }
 
 __global__ void SSIMLossCUDA(
-	bool *mask,
-  int channels,
-  int height,
-  int width,
-  float lambda_dssim,
-  float *mu1_tensor,
-  float *mu2_tensor,
-  float *sigma1_sq_tensor,
-  float *sigma2_sq_tensor,
-  float *sigma12_tensor,
-  float *SSIMoutput,
-  float *dmu1,
-  float *dmu2,
-  float *dsigma1_sq,
-  float *dsigma2_sq,
-  float *dsigma12
-)
-{
-  int x = blockIdx.x * blockDim.x + threadIdx.x;
-	int y = blockIdx.y * blockDim.y + threadIdx.y;
-	int c = blockIdx.z;
+    bool *mask,
+    int channels,
+    int height,
+    int width,
+    float lambda_dssim,
+    float *mu1_tensor,
+    float *mu2_tensor,
+    float *sigma1_sq_tensor,
+    float *sigma2_sq_tensor,
+    float *sigma12_tensor,
+    float *SSIMoutput,
+    float *dmu1,
+    float *dmu2,
+    float *dsigma1_sq,
+    float *dsigma2_sq,
+    float *dsigma12,
+    float *block_SSIMoutput
+) {
+    extern __shared__ float shared_ssim[];
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int c = blockIdx.z;
 
-  const float C1 = 0.01 * 0.01;
-  const float C2 = 0.03 * 0.03;
+    const float C1 = 0.01 * 0.01;
+    const float C2 = 0.03 * 0.03;
 
-	if (x < width && y < height && c < channels) {
-    int index = c * width * height + y * width + x;
-    float mu1 = mu1_tensor[index];
-    float mu2 = mu2_tensor[index];
+    if (x < width && y < height && c < channels) {
+        int index = c * width * height + y * width + x;
+        float mu1 = mu1_tensor[index];
+        float mu2 = mu2_tensor[index];
 
-    float mu1_sq = mu1 * mu1;
-    float mu2_sq = mu2 * mu2;
-    float mu1_mu2 = mu1 * mu2;
+        float mu1_sq = mu1 * mu1;
+        float mu2_sq = mu2 * mu2;
+        float mu1_mu2 = mu1 * mu2;
 
-    float sigma1_sq = sigma1_sq_tensor[index] - mu1_sq;
-    float sigma2_sq = sigma2_sq_tensor[index] - mu2_sq;
-    float sigma12 = sigma12_tensor[index] - mu1_mu2;
+        float sigma1_sq = sigma1_sq_tensor[index] - mu1_sq;
+        float sigma2_sq = sigma2_sq_tensor[index] - mu2_sq;
+        float sigma12 = sigma12_tensor[index] - mu1_mu2;
 
-    float A = 2 * mu1_mu2 + C1;
-    float B = 2 * sigma12 + C2;
-    float C = mu1_sq + mu2_sq + C1;
-    float D = sigma1_sq + sigma2_sq + C2;
-    float ssim = (A * B) / (C * D);
-      // ((2 * mu1_mu2 + C1) * (2 * sigma12 + C2)) / 
-      // ((mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2));
-		SSIMoutput[index] = ssim * mask[y * width + x];
-    dmu1[index] = mask[y * width + x] * (-1) * lambda_dssim * ((B * 2 * mu2) / (C * D) - (A * 2 * mu2) / (C * D) - (A * B * 2 * mu1) / (C * C * D) + (A * B * 2 * mu1) / (C * D * D));
-    dmu2[index] = mask[y * width + x] * (-1) * lambda_dssim * ((B * 2 * mu1) / (C * D) - (A * 2 * mu1) / (C * D) - (A * B * 2 * mu2) / (C * C * D) + (A * B * 2 * mu2) / (C * D * D));
-    dsigma1_sq[index] = mask[y * width + x] * lambda_dssim * (A * B) / (C * D * D);
-    dsigma2_sq[index] = mask[y * width + x] * lambda_dssim * (A * B) / (C * D * D);
-    dsigma12[index] = mask[y * width + x] * (-1) * lambda_dssim * (A * 2) / (C * D);
-  }
+        float A = 2 * mu1_mu2 + C1;
+        float B = 2 * sigma12 + C2;
+        float C = mu1_sq + mu2_sq + C1;
+        float D = sigma1_sq + sigma2_sq + C2;
+        float ssim = (A * B) / (C * D);
+
+        SSIMoutput[index] = ssim * mask[y * width + x];
+
+        // Store the SSIM value in shared memory
+        shared_ssim[threadIdx.y * blockDim.x + threadIdx.x] = SSIMoutput[index];
+    } else {
+        shared_ssim[threadIdx.y * blockDim.x + threadIdx.x] = 0.0f;
+    }
+
+    __syncthreads();
+
+    // Reduce the SSIM values within the block
+    for (int stride = blockDim.x * blockDim.y / 2; stride > 0; stride >>= 1) {
+        if (threadIdx.y * blockDim.x + threadIdx.x < stride) {
+            shared_ssim[threadIdx.y * blockDim.x + threadIdx.x] += shared_ssim[threadIdx.y * blockDim.x + threadIdx.x + stride];
+        }
+        __syncthreads();
+    }
+
+    if (threadIdx.y == 0 && threadIdx.x == 0) {
+        block_SSIMoutput[blockIdx.z * gridDim.y * gridDim.x + blockIdx.y * gridDim.x + blockIdx.x] = shared_ssim[0];
+    }
 }
+
+__global__ void block_sum(
+    float *block_SSIMoutput,
+    float *loss,
+    int num_blocks
+) {
+    extern __shared__ float shared_sum[];
+    int tid = threadIdx.x;
+    int index = blockIdx.x * blockDim.x + tid;
+
+    if (index < num_blocks) {
+        shared_sum[tid] = block_SSIMoutput[index];
+    } else {
+        shared_sum[tid] = 0.0f;
+    }
+
+    __syncthreads();
+
+    // Reduce within the block
+    for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+        if (tid < stride) {
+            shared_sum[tid] += shared_sum[tid + stride];
+        }
+        __syncthreads();
+    }
+
+    if (tid == 0) {
+        atomicAdd(loss, shared_sum[0]);
+    }
+}
+
+
 
 
 /////////////////////////////// Preprocess ///////////////////////////////
@@ -1021,9 +1067,14 @@ void CudaRasterizer::Rasterizer::SSIMlossForwardBackward(
   float *dsigma12
 )
 {
+	
 	// SSIM loss.
 	float *SSIMoutput;
 	cudaMalloc(&SSIMoutput, channels * height * width * sizeof(float));
+
+	float *block_SSIMoutput;
+	cudaMalloc(&block_SSIMoutput, num_blocks * sizeof(float));
+	cudaMemset(block_SSIMoutput, 0, num_blocks * sizeof(float));
 
 	dim3 dimBlock(16, 16); // Adjust block size as needed
   dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, (height + dimBlock.y - 1) / dimBlock.y, channels);
@@ -1047,13 +1098,27 @@ void CudaRasterizer::Rasterizer::SSIMlossForwardBackward(
     dsigma12
   );
 
-	int num_items = channels * height * width;
-	void *d_temp_storage = NULL;
-	size_t temp_storage_bytes = 0;
-	cub::DeviceReduce::Sum(d_temp_storage, temp_storage_bytes, SSIMoutput, loss, num_items);
-	cudaMalloc(&d_temp_storage, temp_storage_bytes);
-	cub::DeviceReduce::Sum(d_temp_storage, temp_storage_bytes, SSIMoutput, loss, num_items);
+  	float *loss;
+	cudaMalloc(&loss, sizeof(float));
+	cudaMemset(loss, 0, sizeof(float));
 
-	cudaFree(d_temp_storage);
-	cudaFree(SSIMoutput);
+	int num_pixels = channels * height * width;
+
+	int threads_per_block = 1024;
+	int blocks = (num_blocks + threads_per_block - 1) / threads_per_block;
+	block_sum<<<blocks, threads_per_block, threads_per_block * sizeof(float)>>>(block_SSIMoutput, loss, num_blocks);
+
+	float h_loss;
+	cudaMemcpy(&h_loss, loss, sizeof(float), cudaMemcpyDeviceToHost);
+	h_loss /= num_pixels;
+
+	cudaFree(block_SSIMoutput);
+	cudaFree(loss);
+	// kernel 算万了以后做reduction
+	// cub::DeviceReduce::Sum(d_temp_storage, temp_storage_bytes, SSIMoutput, loss, num_items);
+	// cudaMalloc(&d_temp_storage, temp_storage_bytes);
+	// cub::DeviceReduce::Sum(d_temp_storage, temp_storage_bytes, SSIMoutput, loss, num_items);
+
+	printf("SSIM Loss: %f\n", h_loss);
+
 }
