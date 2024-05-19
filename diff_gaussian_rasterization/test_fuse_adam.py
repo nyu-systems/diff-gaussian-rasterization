@@ -1,7 +1,7 @@
 import torch
 import time
 import torch.nn as nn
-from diff_gaussian_rasterization import FusedAdam
+from diff_gaussian_rasterization import FusedAdamSingleTensor, FusedAdamMultiTensor
 import torch.cuda.profiler as profiler
 import argparse
 
@@ -46,10 +46,10 @@ def main():
 
     if args.optimizer == 'fused_single':
         print("################ Test Fused Adam : Single tensor #################")
-        optimizer = FusedAdam(params_groups, lr=lr, beta_1=0.9, beta_2=0.999, epsilon=1e-08, weight_decay=0.0, multi_tensor=False)
+        optimizer = FusedAdamSingleTensor(params_groups, lr=lr, beta_1=0.9, beta_2=0.999, epsilon=1e-08, weight_decay=0.0)        
     elif args.optimizer == 'fused_multi':
         print("################ Test Fused Adam : Multi tensor #################")
-        optimizer = FusedAdam(params_groups, lr=lr, beta_1=0.9, beta_2=0.999, epsilon=1e-08, weight_decay=0.0, multi_tensor=True)
+        optimizer = FusedAdamMultiTensor(params_groups, lr=lr, beta_1=0.9, beta_2=0.999, epsilon=1e-08, weight_decay=0.0)
     elif args.optimizer == 'torch_adam':
         print("################ Test Pytorch Adam #################")
         optimizer = torch.optim.Adam(params_groups, lr=lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.0)
@@ -63,16 +63,18 @@ def main():
 
     torch.set_printoptions(precision=10)
     total_time = 0
-    epochs = 10
+    epochs = 100
     for epoch in range(epochs):
         optimizer.zero_grad()
         outputs = model(x)
         loss = criterion(outputs, y)
         loss.backward()
+        torch.cuda.synchronize()
         t1 = time.time()
         profiler.start()
         optimizer.step()
         profiler.stop()
+        torch.cuda.synchronize() # kernels launchs are asynchronous, we need to wait for them to finish to get correct timing
         t2 = time.time()
         total_time += (t2 - t1)
         print(f"Epoch {epoch+1}, Loss: {loss.item()}")
@@ -81,3 +83,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# python test_fuse_adam.py --optimizer fused_single --hidden_size 1000 > fused_single.log
