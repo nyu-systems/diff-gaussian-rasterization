@@ -88,7 +88,7 @@ FuseAdamStepCUDASingleTensor(
         v.contiguous().data<float>(), 
         lr, beta_1, beta_2, epsilon, weight_decay, t, total_elements);
     // cudaProfilerStop();
-
+    cudaDeviceSynchronize();
 }
 
 __global__ void op_adam_multi_tensor_kernel(TensorInfo tis, int step, int num_params, int tot_num_elems)
@@ -252,4 +252,5 @@ FuseAdamStepCUDAMultiTensor(
         chunk_length = 0;
         param_idx_in_chunk = 0;
     }
+    cudaDeviceSynchronize();
 }
