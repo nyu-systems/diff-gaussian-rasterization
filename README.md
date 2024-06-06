@@ -1,6 +1,6 @@
 # Differential Gaussian Rasterization
 
-Used as the rasterization engine for the paper "3D Gaussian Splatting for Real-Time Rendering of Radiance Fields". If you can make use of it in your own research, please be so kind to cite us.
+Used as the rasterization engine for [Grendel-GS](https://github.com/TarzanZhao/gaussian-splatting). If you can make use of it in your own research, please be so kind to cite us.
 
 <section class="section" id="BibTeX">
   <div class="container is-max-desktop content">
@@ -16,4 +16,5 @@ Used as the rasterization engine for the paper "3D Gaussian Splatting for Real-T
       url          = {https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/}
 }</code></pre>
   </div>
+  TODO: update this to be our own bib.
 </section>
