@@ -1,3 +1,3 @@
-# Differential Gaussian Rasterization in Grendal-GS
+# Differential Gaussian Rasterization in Grendel-GS
 
-Used as the cuda rasterization engine for [Grendal-GS](https://github.com/nyu-systems/Grendal-GS). 
+Used as the cuda rasterization engine for [Grendel-GS](https://github.com/nyu-systems/Grendel-GS). 
