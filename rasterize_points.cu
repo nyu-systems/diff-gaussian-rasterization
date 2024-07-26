@@ -57,6 +57,27 @@ torch::Tensor markVisible(
   return present;
 }
 
+torch::Tensor GetSend2GpuCUDA(
+    torch::Tensor& means3D,
+    torch::Tensor& viewmatrix,
+    torch::Tensor& projmatrix)
+{
+    const int P = means3D.size(0);
+
+    torch::Tensor present = torch::full({P}, false, means3D.options().dtype(at::kBool));
+ 
+    if(P != 0) {
+        CudaRasterizer::Rasterizer::getSend2Gpu(
+            P,
+		    means3D.contiguous().data<float>(),
+		    viewmatrix.contiguous().data<float>(),
+		    projmatrix.contiguous().data<float>(),
+		    present.contiguous().data<bool>());
+    }
+  
+    return present;
+}
+
 
 /////////////////////////////// Preprocess ///////////////////////////////
 

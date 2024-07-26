@@ -34,6 +34,13 @@ namespace CudaRasterizer
 			float* projmatrix,
 			bool* present);
 
+        static void getSend2Gpu(
+            int P,
+            float* means3D,
+            float* viewmatrix,
+            float* projmatrix,
+            bool* present);
+
 
 		/////////////////////////////// Preprocess ///////////////////////////////
 

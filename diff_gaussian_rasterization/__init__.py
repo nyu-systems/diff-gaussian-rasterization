@@ -482,3 +482,14 @@ def merge_image_tiles_by_pos(
         touched_pixels_rect,
         touched_tiles_rect
     )# return image should be in local coordinate.
+
+def get_send2gpu(
+    means3D,
+    viewmatrix,
+    projmatrix
+):
+    return _C.get_send2gpu(
+        means3D,
+        viewmatrix,
+        projmatrix
+    )

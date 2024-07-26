@@ -21,7 +21,10 @@ torch::Tensor markVisible(
 		torch::Tensor& viewmatrix,
 		torch::Tensor& projmatrix);
 
-
+torch::Tensor GetSend2GpuCUDA(
+    torch::Tensor& means3D,
+    torch::Tensor& viewmatrix,
+    torch::Tensor& projmatrix);
 
 
 /////////////////////////////// Preprocess ///////////////////////////////

@@ -30,4 +30,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("get_pixels_compute_locally_and_in_rect", &GetPixelsComputeLocallyAndInRect);
 
   m.def("get_block_XY", &GetBlockXY);
+
+  m.def("get_send2gpu", &GetSend2GpuCUDA);
 }
