@@ -83,6 +83,131 @@ __global__ void send2GpuKernel(int P,
 	present[idx] = send2gpu(idx, orig_points, viewmatrix, projmatrix, p_view);
 }
 
+__global__ void get_rank2id(bool *mask, int64_t *mask_presum, int64_t *rank2id, int64_t n_row) {
+    int64_t n_threads = gridDim.x * blockDim.x;
+    for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < n_row; i += n_threads) {
+        if (mask[i]) {
+            rank2id[mask_presum[i]-1] = i;
+        }
+    }
+}
+
+// Transfer attr to scattered dest.
+__global__ void scattered_transfer_cpu2gpu(
+    float *h_attr_1,
+    float *h_attr_2,
+    float *h_attr_3,
+    float *h_attr_4,
+    float *h_attr_5,
+    int64_t M1,
+    int64_t M2,
+    int64_t M3,
+    int64_t M4,
+    int64_t M5,
+    int64_t *rank2id,
+    int64_t num_select,
+    float *d_dest_1,
+    float *d_dest_2,
+    float *d_dest_3,
+    float *d_dest_4,
+    float *d_dest_5
+) {
+    int64_t stride = gridDim.x * blockDim.x;
+    int64_t total_elements = num_select * (M1 + M2 + M3 + M4 + M5);
+    int64_t offset;
+    int64_t offset_source;
+
+    for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < total_elements; i += stride) {
+        if (i < num_select * M1) {
+            offset = i;
+            offset_source = rank2id[offset / M1] * M1 + offset % M1;
+            d_dest_1[offset] = h_attr_1[offset_source];
+        }
+        else if (i < num_select * (M1 + M2)) {
+            offset = i - num_select * M1;
+            offset_source = rank2id[offset / M2] * M2 + offset % M2;
+            d_dest_2[offset] = h_attr_2[offset_source];
+        }
+        else if (i < num_select * (M1 + M2 + M3)) {
+            offset = i - num_select * (M1 + M2);
+            offset_source = rank2id[offset / M3] * M3 + offset % M3;
+            d_dest_3[offset] = h_attr_3[offset_source];
+        }
+        else if (i < num_select * (M1 + M2 + M3 + M4)) {
+            offset = i - num_select * (M1 + M2 + M3);
+            offset_source = rank2id[offset / M4] * M4 + offset % M4;
+            d_dest_4[offset] = h_attr_4[offset_source];
+        }
+        else {
+            offset = i - num_select * (M1 + M2 + M3 + M4);
+            offset_source = rank2id[offset / M5] * M5 + offset % M5;
+            d_dest_5[offset] = h_attr_5[offset_source];
+        }
+    }
+}
+
+// Transfer attr to scattered dest.
+__global__ void scattered_transfer_gpu2cpu(
+    float *d_attr_1,
+    float *d_attr_2,
+    float *d_attr_3,
+    float *d_attr_4,
+    float *d_attr_5,
+    float *d_attr_6,
+    int64_t M1,
+    int64_t M2,
+    int64_t M3,
+    int64_t M4,
+    int64_t M5,
+    int64_t M6,
+    int64_t *rank2id,
+    int64_t num_select,
+    float *h_dest_1,
+    float *h_dest_2,
+    float *h_dest_3,
+    float *h_dest_4,
+    float *h_dest_5,
+    float *h_dest_6
+) {
+    int64_t stride = gridDim.x * blockDim.x;
+    int64_t total_elements = num_select * (M1 + M2 + M3 + M4 + M5 + M6);
+    int64_t offset;
+    int64_t offset_dest;
+
+    for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < total_elements; i += stride) {
+        if (i < num_select * M1) {
+            offset = i;
+            offset_dest = rank2id[offset / M1] * M1 + offset % M1;
+            h_dest_1[offset_dest] = d_attr_1[offset];
+        }
+        else if (i < num_select * (M1 + M2)) {
+            offset = i - num_select * M1;
+            offset_dest = rank2id[offset / M2] * M2 + offset % M2;
+            h_dest_2[offset_dest] = d_attr_2[offset];
+        }
+        else if (i < num_select * (M1 + M2 + M3)) {
+            offset = i - num_select * (M1 + M2);
+            offset_dest = rank2id[offset / M3] * M3 + offset % M3;
+            h_dest_3[offset_dest] = d_attr_3[offset];
+        }
+        else if (i < num_select * (M1 + M2 + M3 + M4)) {
+            offset = i - num_select * (M1 + M2 + M3);
+            offset_dest = rank2id[offset / M4] * M4 + offset % M4;
+            h_dest_4[offset_dest] = d_attr_4[offset];
+        }
+        else if (i < num_select * (M1 + M2 + M3 + M4 + M5)) {
+            offset = i - num_select * (M1 + M2 + M3 + M4);
+            offset_dest = rank2id[offset / M5] * M5 + offset % M5;
+            h_dest_5[offset_dest] = d_attr_5[offset];
+        }
+        else {
+            offset = i - num_select * (M1 + M2 + M3 + M4 + M5);
+            offset_dest = rank2id[offset / M6] * M6 + offset % M6;
+            h_dest_6[offset_dest] = d_attr_6[offset];
+        }
+    }
+}
+
 // Generates one key/value pair for all Gaussian / tile overlaps. 
 // Run once per Gaussian (1:N mapping).
 __global__ void duplicateWithKeys(
@@ -186,6 +311,156 @@ void CudaRasterizer::Rasterizer::getSend2Gpu(
         projmatrix,
 		present);
 }
+
+void launch_rank2id(bool *mask, int64_t *mask_presum, int64_t *rank2id, int64_t n_row) {
+    get_rank2id<<<64, 256>>>(mask, mask_presum, rank2id, n_row);
+}
+
+void launch(
+    char dir,
+    float *attr_1,
+    float *attr_2,
+    float *attr_3,
+    float *attr_4,
+    float *attr_5,
+    float *attr_6,
+    int64_t *d_rank2id,
+    int64_t M1,
+    int64_t M2,
+    int64_t M3,
+    int64_t M4,
+    int64_t M5,
+    int64_t M6,
+    int64_t num_select,
+    float *dest_1,
+    float *dest_2,
+    float *dest_3,
+    float *dest_4,
+    float *dest_5,
+    float *dest_6
+) {
+    if (dir == 'f') {
+        int grid_size = 32;
+        int block_size = 256;
+
+        scattered_transfer_cpu2gpu<<<grid_size, block_size>>>(
+            attr_2,
+            attr_3,
+            attr_4,
+            attr_5,
+            attr_6,
+            M2,
+            M3,
+            M4,
+            M5,
+            M6,
+            d_rank2id,
+            num_select,
+            dest_2,
+            dest_3,
+            dest_4,
+            dest_5,
+            dest_6
+        );
+    }
+    else if (dir == 'b') {
+
+        int grid_size = 32;
+        int block_size = 256;
+
+        scattered_transfer_gpu2cpu<<<grid_size, block_size>>>(
+            attr_1,
+            attr_2,
+            attr_3,
+            attr_4,
+            attr_5,
+            attr_6,
+            M1,
+            M2,
+            M3,
+            M4,
+            M5,
+            M6,
+            d_rank2id,
+            num_select,
+            dest_1,
+            dest_2,
+            dest_3,
+            dest_4,
+            dest_5,
+            dest_6
+        );
+    }
+}
+
+void CudaRasterizer::Rasterizer::scattered_transfer(
+    char dir,
+    float *attr_1,
+    float *attr_2,
+    float *attr_3,
+    float *attr_4,
+    float *attr_5,
+    float *attr_6,
+    bool *d_mask,
+    int64_t M1,
+    int64_t M2,
+    int64_t M3,
+    int64_t M4,
+    int64_t M5,
+    int64_t M6,
+    int64_t N,
+    int64_t num_select,
+    float *dest_1,
+    float *dest_2,
+    float *dest_3,
+    float *dest_4,
+    float *dest_5,
+    float *dest_6,
+    bool debug
+) {
+    // calculate rank2id
+    void     *d_temp_storage = NULL;
+    size_t   temp_storage_bytes = 0;
+    int64_t  *d_mask_presum;
+    cudaMalloc(&d_mask_presum, N * sizeof(int64_t));
+    cudaMemset(d_mask_presum, 0, N * sizeof(int64_t));
+    cub::DeviceScan::InclusiveSum(d_temp_storage, temp_storage_bytes, d_mask, d_mask_presum, N);
+    cudaMalloc(&d_temp_storage, temp_storage_bytes);
+    cub::DeviceScan::InclusiveSum(d_temp_storage, temp_storage_bytes, d_mask, d_mask_presum, N);
+
+    int64_t *d_rank2id;
+    cudaMalloc(&d_rank2id, num_select * sizeof(int64_t));
+    CHECK_CUDA(launch_rank2id(d_mask, d_mask_presum, d_rank2id, N), debug)
+    
+    CHECK_CUDA(launch(
+        dir,
+        attr_1,
+        attr_2,
+        attr_3,
+        attr_4,
+        attr_5,
+        attr_6,
+        d_rank2id,
+        M1,
+        M2,
+        M3,
+        M4,
+        M5,
+        M6,
+        num_select,
+        dest_1,
+        dest_2,
+        dest_3,
+        dest_4,
+        dest_5,
+        dest_6
+    ), debug)
+
+    cudaFree(d_mask_presum);
+    cudaFree(d_temp_storage);
+    cudaFree(d_rank2id);
+}
+
 
 CudaRasterizer::GeometryState CudaRasterizer::GeometryState::fromChunk(char*& chunk, size_t P, bool sep_rendering=false)
 {

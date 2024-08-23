@@ -41,6 +41,32 @@ namespace CudaRasterizer
             float* projmatrix,
             bool* present);
 
+        static void scattered_transfer(
+            char dir,
+            float *attr_1,
+            float *attr_2,
+            float *attr_3,
+            float *attr_4,
+            float *attr_5,
+            float *attr_6,
+            bool *d_mask,
+            int64_t M1,
+            int64_t M2,
+            int64_t M3,
+            int64_t M4,
+            int64_t M5,
+            int64_t M6,
+            int64_t N,
+            int64_t num_select,
+            float *dest_1,
+            float *dest_2,
+            float *dest_3,
+            float *dest_4,
+            float *dest_5,
+            float *dest_6,
+            bool debug
+        );
+
 
 		/////////////////////////////// Preprocess ///////////////////////////////
 

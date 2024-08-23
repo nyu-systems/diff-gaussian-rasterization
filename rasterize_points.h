@@ -26,6 +26,39 @@ torch::Tensor GetSend2GpuCUDA(
     torch::Tensor& viewmatrix,
     torch::Tensor& projmatrix);
 
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+Send2GpuCUDA(
+    torch::Tensor& opacities,
+    torch::Tensor& scales,
+    torch::Tensor& rotations,
+    torch::Tensor& features_dc,
+    torch::Tensor& features_rest,
+    torch::Tensor& mask);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+Send2CpuCUDA_deprecated(
+    torch::Tensor& dmeans3D,
+    torch::Tensor& dopacities,
+    torch::Tensor& dscales,
+    torch::Tensor& drotations,
+    torch::Tensor& dfeatures_dc,
+    torch::Tensor& dfeatures_rest,
+    torch::Tensor& mask);
+
+void Send2CpuCUDA(
+    torch::Tensor& dmeans3D,
+    torch::Tensor& dopacities,
+    torch::Tensor& dscales,
+    torch::Tensor& drotations,
+    torch::Tensor& dfeatures_dc,
+    torch::Tensor& dfeatures_rest,
+    torch::Tensor& mask,
+    torch::Tensor& h_dmeans3D,
+    torch::Tensor& h_dopacities,
+    torch::Tensor& h_dscales,
+    torch::Tensor& h_drotations,
+    torch::Tensor& h_dfeatures_dc,
+    torch::Tensor& h_dfeatures_rest);
 
 /////////////////////////////// Preprocess ///////////////////////////////
 

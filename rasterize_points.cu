@@ -24,6 +24,7 @@
 #include <fstream>
 #include <string>
 #include <functional>
+#include <cassert>
 
 #include <cooperative_groups.h>
 namespace cg = cooperative_groups;
@@ -76,6 +77,206 @@ torch::Tensor GetSend2GpuCUDA(
     }
   
     return present;
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+Send2GpuCUDA(
+    torch::Tensor& opacities,
+    torch::Tensor& scales,
+    torch::Tensor& rotations,
+    torch::Tensor& features_dc,
+    torch::Tensor& features_rest,
+    torch::Tensor& mask)
+{
+    int64_t N = mask.size(0);
+    int64_t num_select = mask.to(torch::kInt32).sum().item<int>();
+    int64_t opacities_dim1 = opacities.size(1);
+    int64_t scales_dim1 = scales.size(1);
+    int64_t rotations_dim1 = rotations.size(1);
+    int64_t features_dc_dim1 = features_dc.size(1);
+    int64_t features_dc_dim2 = features_dc.size(2);
+    int64_t features_rest_dim1 = features_rest.size(1);
+    int64_t features_rest_dim2 = features_rest.size(2);
+    
+    torch::Tensor d_opacities = torch::empty({num_select, opacities_dim1}, opacities.options().device(torch::kCUDA));
+    torch::Tensor d_scales = torch::empty({num_select, scales_dim1}, scales.options().device(torch::kCUDA));
+    torch::Tensor d_rotations = torch::empty({num_select, rotations_dim1}, rotations.options().device(torch::kCUDA));
+    torch::Tensor d_features_dc = torch::empty({num_select, features_dc_dim1, features_dc_dim2}, features_dc.options().device(torch::kCUDA));
+    torch::Tensor d_features_rest = torch::empty({num_select, features_rest_dim1, features_dc_dim2}, features_rest.options().device(torch::kCUDA));
+
+    // cudaDeviceSynchronize();
+
+    CudaRasterizer::Rasterizer::scattered_transfer(
+        'f',
+        NULL,
+        opacities.contiguous().data<float>(),
+        scales.contiguous().data<float>(),
+        rotations.contiguous().data<float>(),
+        features_dc.contiguous().data<float>(),
+        features_rest.contiguous().data<float>(),
+        mask.contiguous().data<bool>(),
+        0,
+        opacities_dim1,
+        scales_dim1,
+        rotations_dim1,
+        features_dc_dim1 * features_dc_dim2,
+        features_rest_dim1 * features_rest_dim2,
+        N,
+        num_select,
+        NULL,
+        d_opacities.contiguous().data<float>(),
+        d_scales.contiguous().data<float>(),
+        d_rotations.contiguous().data<float>(),
+        d_features_dc.contiguous().data<float>(),
+        d_features_rest.contiguous().data<float>(),
+        false
+    );
+
+    return std::make_tuple(d_opacities, d_scales, d_rotations, d_features_dc, d_features_rest);
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+Send2CpuCUDA_deprecated(
+    torch::Tensor& dmeans3D,
+    torch::Tensor& dopacities,
+    torch::Tensor& dscales,
+    torch::Tensor& drotations,
+    torch::Tensor& dfeatures_dc,
+    torch::Tensor& dfeatures_rest,
+    torch::Tensor& mask)
+{
+    int64_t N = mask.size(0);
+    int64_t num_select = mask.to(torch::kInt32).sum().item<int>();
+    int64_t means3D_dim1 = dmeans3D.size(1);
+    int64_t opacities_dim1 = dopacities.size(1);
+    int64_t scales_dim1 = dscales.size(1);
+    int64_t rotations_dim1 = drotations.size(1);
+    int64_t features_dc_dim1 = dfeatures_dc.size(1);
+    int64_t features_dc_dim2 = dfeatures_dc.size(2);
+    int64_t features_rest_dim1 = dfeatures_rest.size(1);
+    int64_t features_rest_dim2 = dfeatures_rest.size(2);
+    
+    torch::Tensor h_dmeans3D = torch::zeros({N, means3D_dim1}, dopacities.options().device(torch::kCPU).pinned_memory(true));
+    torch::Tensor h_dopacities = torch::zeros({N, opacities_dim1}, dopacities.options().device(torch::kCPU).pinned_memory(true));
+    torch::Tensor h_dscales = torch::zeros({N, scales_dim1}, dscales.options().device(torch::kCPU).pinned_memory(true));
+    torch::Tensor h_drotations = torch::zeros({N, rotations_dim1}, drotations.options().device(torch::kCPU).pinned_memory(true));
+    torch::Tensor h_dfeatures_dc = torch::zeros({N, features_dc_dim1, features_dc_dim2}, dfeatures_dc.options().device(torch::kCPU).pinned_memory(true));
+    torch::Tensor h_dfeatures_rest = torch::zeros({N, features_rest_dim1, features_rest_dim2}, dfeatures_rest.options().device(torch::kCPU).pinned_memory(true));
+
+    assert(h_dmeans3D.is_pinned());
+    assert(h_dopacities.is_pinned());
+    assert(h_dscales.is_pinned());
+    assert(h_drotations.is_pinned());
+    assert(h_dfeatures_dc.is_pinned());
+    assert(h_dfeatures_rest.is_pinned());
+
+    assert(dmeans3D.device().is_cuda());
+    assert(dopacities.device().is_cuda());
+    assert(dscales.device().is_cuda());
+    assert(drotations.device().is_cuda());
+    assert(dfeatures_dc.device().is_cuda());
+    assert(dfeatures_rest.device().is_cuda());
+    assert(mask.device().is_cuda());
+    
+    CudaRasterizer::Rasterizer::scattered_transfer(
+        'b',
+        dmeans3D.contiguous().data<float>(),
+        dopacities.contiguous().data<float>(),
+        dscales.contiguous().data<float>(),
+        drotations.contiguous().data<float>(),
+        dfeatures_dc.contiguous().data<float>(),
+        dfeatures_rest.contiguous().data<float>(),
+        mask.contiguous().data<bool>(),
+        means3D_dim1,
+        opacities_dim1,
+        scales_dim1,
+        rotations_dim1,
+        features_dc_dim1 * features_dc_dim2,
+        features_rest_dim1 * features_rest_dim2,
+        N,
+        num_select,
+        h_dmeans3D.contiguous().data<float>(),
+        h_dopacities.contiguous().data<float>(),
+        h_dscales.contiguous().data<float>(),
+        h_drotations.contiguous().data<float>(),
+        h_dfeatures_dc.contiguous().data<float>(),
+        h_dfeatures_rest.contiguous().data<float>(),
+        false
+    );
+
+    cudaDeviceSynchronize();
+
+    return std::make_tuple(h_dmeans3D, h_dopacities, h_dscales, h_drotations, h_dfeatures_dc, h_dfeatures_rest);
+}
+
+void Send2CpuCUDA(
+    torch::Tensor& dmeans3D,
+    torch::Tensor& dopacities,
+    torch::Tensor& dscales,
+    torch::Tensor& drotations,
+    torch::Tensor& dfeatures_dc,
+    torch::Tensor& dfeatures_rest,
+    torch::Tensor& mask,
+    torch::Tensor& h_dmeans3D,
+    torch::Tensor& h_dopacities,
+    torch::Tensor& h_dscales,
+    torch::Tensor& h_drotations,
+    torch::Tensor& h_dfeatures_dc,
+    torch::Tensor& h_dfeatures_rest)
+{
+    int64_t N = mask.size(0);
+    int64_t num_select = mask.to(torch::kInt32).sum().item<int>();
+    int64_t means3D_dim1 = dmeans3D.size(1);
+    int64_t opacities_dim1 = dopacities.size(1);
+    int64_t scales_dim1 = dscales.size(1);
+    int64_t rotations_dim1 = drotations.size(1);
+    int64_t features_dc_dim1 = dfeatures_dc.size(1);
+    int64_t features_dc_dim2 = dfeatures_dc.size(2);
+    int64_t features_rest_dim1 = dfeatures_rest.size(1);
+    int64_t features_rest_dim2 = dfeatures_rest.size(2);
+
+    assert(h_dmeans3D.is_pinned());
+    assert(h_dopacities.is_pinned());
+    assert(h_dscales.is_pinned());
+    assert(h_drotations.is_pinned());
+    assert(h_dfeatures_dc.is_pinned());
+    assert(h_dfeatures_rest.is_pinned());
+
+    assert(dmeans3D.device().is_cuda());
+    assert(dopacities.device().is_cuda());
+    assert(dscales.device().is_cuda());
+    assert(drotations.device().is_cuda());
+    assert(dfeatures_dc.device().is_cuda());
+    assert(dfeatures_rest.device().is_cuda());
+    assert(mask.device().is_cuda());
+    
+    CudaRasterizer::Rasterizer::scattered_transfer(
+        'b',
+        dmeans3D.contiguous().data<float>(),
+        dopacities.contiguous().data<float>(),
+        dscales.contiguous().data<float>(),
+        drotations.contiguous().data<float>(),
+        dfeatures_dc.contiguous().data<float>(),
+        dfeatures_rest.contiguous().data<float>(),
+        mask.contiguous().data<bool>(),
+        means3D_dim1,
+        opacities_dim1,
+        scales_dim1,
+        rotations_dim1,
+        features_dc_dim1 * features_dc_dim2,
+        features_rest_dim1 * features_rest_dim2,
+        N,
+        num_select,
+        h_dmeans3D.contiguous().data<float>(),
+        h_dopacities.contiguous().data<float>(),
+        h_dscales.contiguous().data<float>(),
+        h_drotations.contiguous().data<float>(),
+        h_dfeatures_dc.contiguous().data<float>(),
+        h_dfeatures_rest.contiguous().data<float>(),
+        false
+    );
+
+    cudaDeviceSynchronize();
 }
 
 

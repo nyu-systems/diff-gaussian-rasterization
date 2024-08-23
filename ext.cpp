@@ -32,4 +32,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("get_block_XY", &GetBlockXY);
 
   m.def("get_send2gpu", &GetSend2GpuCUDA);
+  m.def("send2gpu", &Send2GpuCUDA);
+  m.def("send2cpu_deprecated", &Send2CpuCUDA_deprecated);
+  m.def("send2cpu", &Send2CpuCUDA);
 }

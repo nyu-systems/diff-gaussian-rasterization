@@ -493,3 +493,92 @@ def get_send2gpu(
         viewmatrix,
         projmatrix
     )
+
+def send2gpu(
+    opacities,
+    scales,
+    rotations,
+    features_dc,
+    features_rest,
+    mask
+):
+    assert opacities.is_pinned(), "opacities should be pinned"
+    assert scales.is_pinned(), "scales should be pinned"
+    assert rotations.is_pinned(), "rotations should be pinned"
+    assert features_dc.is_pinned(), "features_dc should be pinned"
+    assert features_rest.is_pinned(), "features_rest should be pinned"
+    assert mask.is_cuda, "mask should be on gpu"
+    
+    return _C.send2gpu(
+        opacities,
+        scales,
+        rotations,
+        features_dc,
+        features_rest,
+        mask
+    )
+
+def send2cpu_deprecated(
+    d_means3D,
+    d_opacities,
+    d_scales,
+    d_rotations,
+    d_features_dc,
+    d_features_rest,
+    mask
+):
+    return _C.send2cpu_deprecated(
+        d_means3D,
+        d_opacities,
+        d_scales,
+        d_rotations,
+        d_features_dc,
+        d_features_rest,
+        mask
+    )
+    
+def send2cpu(
+    d_means3D,
+    d_opacities,
+    d_scales,
+    d_rotations,
+    d_features_dc,
+    d_features_rest,
+    mask,
+    d_means3D_h,
+    d_opacities_h,
+    d_scales_h,
+    d_rotations_h,
+    d_features_dc_h,
+    d_features_rest_h
+):
+    assert d_means3D.is_cuda
+    assert d_opacities.is_cuda
+    assert d_scales.is_cuda
+    assert d_rotations.is_cuda
+    assert d_features_dc.is_cuda
+    assert d_features_rest.is_cuda
+    assert mask.is_cuda
+    
+    assert d_means3D_h.is_pinned()
+    assert d_opacities_h.is_pinned()
+    assert d_scales_h.is_pinned()
+    assert d_rotations_h.is_pinned()
+    assert d_features_dc_h.is_pinned()
+    assert d_features_rest_h.is_pinned()
+    
+    return _C.send2cpu(
+        d_means3D,
+        d_opacities,
+        d_scales,
+        d_rotations,
+        d_features_dc,
+        d_features_rest,
+        mask,
+        d_means3D_h,
+        d_opacities_h,
+        d_scales_h,
+        d_rotations_h,
+        d_features_dc_h,
+        d_features_rest_h
+    )
