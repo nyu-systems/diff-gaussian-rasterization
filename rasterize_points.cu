@@ -135,6 +135,97 @@ Send2GpuCUDA(
     return std::make_tuple(d_opacities, d_scales, d_rotations, d_features_dc, d_features_rest);
 }
 
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+SendCat2GpuCUDA(
+    torch::Tensor& parameters,
+    torch::Tensor& mask,
+    torch::Tensor& dims,
+    torch::Tensor& dims_presum_shift,
+    torch::Tensor& col2attr)
+{
+    int64_t N = mask.size(0);
+    int64_t num_select = mask.to(torch::kInt32).sum().item<int>();
+    int n_col = parameters.size(1);
+
+    auto options = torch::TensorOptions().device(torch::kCUDA);
+    torch::Tensor d_opacities = torch::empty({num_select, dims[1].item<int>()}, options);
+    torch::Tensor d_scales = torch::empty({num_select, dims[2].item<int>()}, options);
+    torch::Tensor d_rotations = torch::empty({num_select, dims[3].item<int>()}, options);
+    torch::Tensor d_features_dc = torch::empty({num_select, dims[4].item<int>()}, options);
+    torch::Tensor d_features_rest = torch::empty({num_select, dims[5].item<int>()}, options);
+
+    float **h_parameters;
+    cudaMallocHost(&h_parameters, 6 * sizeof(float *));
+    h_parameters[1] = d_opacities.contiguous().data<float>();
+    h_parameters[2] = d_scales.contiguous().data<float>();
+    h_parameters[3] = d_rotations.contiguous().data<float>();
+    h_parameters[4] = d_features_dc.contiguous().data<float>();
+    h_parameters[5] = d_features_rest.contiguous().data<float>();
+
+    float **d_parameters;
+    cudaMalloc(&d_parameters, 6 * sizeof(float *));
+    cudaMemcpy(d_parameters, h_parameters, 6 * sizeof(float *), cudaMemcpyHostToDevice);
+
+    CudaRasterizer::Rasterizer::cat_transfer(
+        'f',
+        d_parameters,
+        parameters.contiguous().data<float>(),
+        mask.contiguous().data<bool>(),
+        dims.contiguous().data<int>(),
+        dims_presum_shift.contiguous().data<int>(),
+        col2attr.contiguous().data<int>(),
+        n_col,
+        N,
+        num_select,
+        false
+    );
+
+    return std::make_tuple(d_opacities, d_scales, d_rotations, d_features_dc, d_features_rest);
+}
+
+void SendCat2GpuBufferCUDA(
+    torch::Tensor& parameters,
+    torch::Tensor& mask,
+    torch::Tensor& dims,
+    torch::Tensor& dims_presum_shift,
+    torch::Tensor& col2attr,
+    torch::Tensor& d_opacities,
+    torch::Tensor& d_scales,
+    torch::Tensor& d_rotations,
+    torch::Tensor& d_features_dc,
+    torch::Tensor& d_features_rest)
+{
+    int64_t N = mask.size(0);
+    int64_t num_select = mask.to(torch::kInt32).sum().item<int>();
+    int n_col = parameters.size(1);
+
+    float **h_parameters;
+    cudaMallocHost(&h_parameters, 6 * sizeof(float *));
+    h_parameters[1] = d_opacities.contiguous().data<float>();
+    h_parameters[2] = d_scales.contiguous().data<float>();
+    h_parameters[3] = d_rotations.contiguous().data<float>();
+    h_parameters[4] = d_features_dc.contiguous().data<float>();
+    h_parameters[5] = d_features_rest.contiguous().data<float>();
+
+    float **d_parameters;
+    cudaMalloc(&d_parameters, 6 * sizeof(float *));
+    cudaMemcpy(d_parameters, h_parameters, 6 * sizeof(float *), cudaMemcpyHostToDevice);
+
+    CudaRasterizer::Rasterizer::cat_transfer(
+        'f',
+        d_parameters,
+        parameters.contiguous().data<float>(),
+        mask.contiguous().data<bool>(),
+        dims.contiguous().data<int>(),
+        dims_presum_shift.contiguous().data<int>(),
+        col2attr.contiguous().data<int>(),
+        n_col,
+        N,
+        num_select,
+        false
+    );
+}
+
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 Send2CpuCUDA_deprecated(
     torch::Tensor& dmeans3D,
@@ -277,6 +368,99 @@ void Send2CpuCUDA(
     );
 
     cudaDeviceSynchronize();
+}
+
+torch::Tensor Send2CpuCatCUDA(
+    torch::Tensor& dmeans3D,
+    torch::Tensor& dopacities,
+    torch::Tensor& dscales,
+    torch::Tensor& drotations,
+    torch::Tensor& dfeatures_dc,
+    torch::Tensor& dfeatures_rest,
+    torch::Tensor& mask,
+    torch::Tensor& dims,
+    torch::Tensor& dims_presum_shift,
+    torch::Tensor& col2attr)
+{
+    int64_t N = mask.size(0);
+    int64_t num_select = mask.to(torch::kInt32).sum().item<int>();
+    int n_col = dims.sum().item<int>();
+
+    torch::Tensor dparameters = torch::empty({N, dims.size(0)});
+
+    float **h_param_ptrs;
+    cudaMallocHost(&h_param_ptrs, 6 * sizeof(float *));
+    h_param_ptrs[0] = dmeans3D.contiguous().data<float>();
+    h_param_ptrs[1] = dopacities.contiguous().data<float>();
+    h_param_ptrs[2] = dscales.contiguous().data<float>();
+    h_param_ptrs[3] = drotations.contiguous().data<float>();
+    h_param_ptrs[4] = dfeatures_dc.contiguous().data<float>();
+    h_param_ptrs[5] = dfeatures_rest.contiguous().data<float>();
+
+    float **d_param_ptrs;
+    cudaMalloc(&d_param_ptrs, 6 * sizeof(float *));
+    cudaMemcpy(d_param_ptrs, h_param_ptrs, 6 * sizeof(float *), cudaMemcpyHostToDevice);
+
+    CudaRasterizer::Rasterizer::cat_transfer(
+        'b',
+        d_param_ptrs,
+        dparameters.contiguous().data<float>(),
+        mask.contiguous().data<bool>(),
+        dims.contiguous().data<int>(),
+        dims_presum_shift.contiguous().data<int>(),
+        col2attr.contiguous().data<int>(),
+        n_col,
+        N,
+        num_select,
+        false
+    );
+
+    return dparameters;
+}
+
+void Send2CpuCatBufferCUDA(
+    torch::Tensor& dmeans3D,
+    torch::Tensor& dopacities,
+    torch::Tensor& dscales,
+    torch::Tensor& drotations,
+    torch::Tensor& dfeatures_dc,
+    torch::Tensor& dfeatures_rest,
+    torch::Tensor& mask,
+    torch::Tensor& dims,
+    torch::Tensor& dims_presum_shift,
+    torch::Tensor& col2attr,
+    torch::Tensor& h_dparameters)
+{
+    int64_t N = mask.size(0);
+    int64_t num_select = mask.to(torch::kInt32).sum().item<int>();
+    int n_col = dims.sum().item<int>();
+
+    float **h_param_ptrs;
+    cudaMallocHost(&h_param_ptrs, 6 * sizeof(float *));
+    h_param_ptrs[0] = dmeans3D.contiguous().data<float>();
+    h_param_ptrs[1] = dopacities.contiguous().data<float>();
+    h_param_ptrs[2] = dscales.contiguous().data<float>();
+    h_param_ptrs[3] = drotations.contiguous().data<float>();
+    h_param_ptrs[4] = dfeatures_dc.contiguous().data<float>();
+    h_param_ptrs[5] = dfeatures_rest.contiguous().data<float>();
+
+    float **d_param_ptrs;
+    cudaMalloc(&d_param_ptrs, 6 * sizeof(float *));
+    cudaMemcpy(d_param_ptrs, h_param_ptrs, 6 * sizeof(float *), cudaMemcpyHostToDevice);
+
+    CudaRasterizer::Rasterizer::cat_transfer(
+        'b',
+        d_param_ptrs,
+        h_dparameters.contiguous().data<float>(),
+        mask.contiguous().data<bool>(),
+        dims.contiguous().data<int>(),
+        dims_presum_shift.contiguous().data<int>(),
+        col2attr.contiguous().data<int>(),
+        n_col,
+        N,
+        num_select,
+        false
+    );
 }
 
 

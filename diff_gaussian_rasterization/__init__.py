@@ -582,3 +582,63 @@ def send2cpu(
         d_features_dc_h,
         d_features_rest_h
     )
+
+def send_cat2gpu(
+    parameters,
+    mask,
+    dims,
+    dims_presum_rshift,
+    col2attr
+):
+    assert parameters.is_pinned()
+    assert mask.is_cuda
+    assert dims.is_cuda
+    assert dims_presum_rshift.is_cuda
+    assert col2attr.is_cuda
+    
+    return _C.send_cat2gpu(
+        parameters,
+        mask,
+        dims,
+        dims_presum_rshift,
+        col2attr
+    )
+
+def send2cpu_cat_buffer(
+    dmeans3D,
+    dopacities,
+    dscales,
+    drotations,
+    dfeatures_dc,
+    dfeatures_rest,
+    mask,
+    dims,
+    dims_presum_rshift,
+    col2attr,
+    h_dparameters
+):
+    assert dmeans3D.is_cuda
+    assert dopacities.is_cuda
+    assert dscales.is_cuda
+    assert drotations.is_cuda
+    assert dfeatures_dc.is_cuda
+    assert dfeatures_rest.is_cuda
+    assert mask.is_cuda
+    assert dims.is_cuda
+    assert dims_presum_rshift.is_cuda
+    assert col2attr.is_cuda
+    assert h_dparameters.is_pinned()
+    
+    return _C.send2cpu_cat_buffer(
+        dmeans3D,
+        dopacities,
+        dscales,
+        drotations,
+        dfeatures_dc,
+        dfeatures_rest,
+        mask,
+        dims,
+        dims_presum_rshift,
+        col2attr,
+        h_dparameters
+    )

@@ -35,6 +35,26 @@ Send2GpuCUDA(
     torch::Tensor& features_rest,
     torch::Tensor& mask);
 
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+SendCat2GpuCUDA(
+    torch::Tensor& parameters,
+    torch::Tensor& mask,
+    torch::Tensor& dims,
+    torch::Tensor& dims_presum_shift,
+    torch::Tensor& col2attr);
+
+void SendCat2GpuBufferCUDA(
+    torch::Tensor& parameters,
+    torch::Tensor& mask,
+    torch::Tensor& dims,
+    torch::Tensor& dims_presum_shift,
+    torch::Tensor& col2attr,
+    torch::Tensor& d_opacities,
+    torch::Tensor& d_scales,
+    torch::Tensor& d_rotations,
+    torch::Tensor& d_features_dc,
+    torch::Tensor& d_features_rest);
+
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 Send2CpuCUDA_deprecated(
     torch::Tensor& dmeans3D,
@@ -59,6 +79,31 @@ void Send2CpuCUDA(
     torch::Tensor& h_drotations,
     torch::Tensor& h_dfeatures_dc,
     torch::Tensor& h_dfeatures_rest);
+
+torch::Tensor Send2CpuCatCUDA(
+    torch::Tensor& dmeans3D,
+    torch::Tensor& dopacities,
+    torch::Tensor& dscales,
+    torch::Tensor& drotations,
+    torch::Tensor& dfeatures_dc,
+    torch::Tensor& dfeatures_rest,
+    torch::Tensor& mask,
+    torch::Tensor& dims,
+    torch::Tensor& dims_presum_shift,
+    torch::Tensor& col2attr);
+
+void Send2CpuCatBufferCUDA(
+    torch::Tensor& dmeans3D,
+    torch::Tensor& dopacities,
+    torch::Tensor& dscales,
+    torch::Tensor& drotations,
+    torch::Tensor& dfeatures_dc,
+    torch::Tensor& dfeatures_rest,
+    torch::Tensor& mask,
+    torch::Tensor& dims,
+    torch::Tensor& dims_presum_shift,
+    torch::Tensor& col2attr,
+    torch::Tensor& h_dparameters);
 
 /////////////////////////////// Preprocess ///////////////////////////////
 

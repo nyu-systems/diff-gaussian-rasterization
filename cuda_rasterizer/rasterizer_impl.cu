@@ -208,6 +208,60 @@ __global__ void scattered_transfer_gpu2cpu(
     }
 }
 
+__global__ void cat_transfer_cpu2gpu(
+    float *h_srce,
+    int *dims,
+    int *dims_presum_rshift,
+    int *col2attr,
+    int n_col,
+    int64_t *rank2id,
+    int64_t num_select,
+    float **d_dest
+) {
+    int64_t stride = gridDim.x * blockDim.x;
+    int64_t total_elements = num_select * n_col;
+
+    for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < total_elements; i += stride) {
+        int64_t row = i / n_col;
+        int col = i % n_col;
+        int attr = col2attr[col];
+
+        // Do nothing to attr0(means3D) in fwd path
+        if (attr != 0) {
+            int64_t offset_srce = rank2id[row] * n_col + col;
+            int64_t offset_dest = row * dims[attr] + col - dims_presum_rshift[attr];
+
+            d_dest[attr][offset_dest] = h_srce[offset_srce];
+        }
+
+    }
+}
+
+__global__ void cat_transfer_gpu2cpu(
+    float **d_srce,
+    int *dims,
+    int *dims_presum_rshift,
+    int *col2attr,
+    int n_col,
+    int64_t *rank2id,
+    int64_t num_select,
+    float *h_dest
+) {
+    int64_t stride = gridDim.x * blockDim.x;
+    int64_t total_elements = num_select * n_col;
+
+    for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < total_elements; i += stride) {
+        int64_t row = i / n_col;
+        int col = i % n_col;
+        int attr = col2attr[col];
+
+        int64_t offset_dest = rank2id[row] * n_col + col;
+        int64_t offset_srce = row * dims[attr] + col - dims_presum_rshift[attr];
+
+        h_dest[offset_dest] = d_srce[attr][offset_srce];
+    }
+}
+
 // Generates one key/value pair for all Gaussian / tile overlaps. 
 // Run once per Gaussian (1:N mapping).
 __global__ void duplicateWithKeys(
@@ -312,85 +366,9 @@ void CudaRasterizer::Rasterizer::getSend2Gpu(
 		present);
 }
 
-void launch_rank2id(bool *mask, int64_t *mask_presum, int64_t *rank2id, int64_t n_row) {
-    get_rank2id<<<64, 256>>>(mask, mask_presum, rank2id, n_row);
-}
-
-void launch(
-    char dir,
-    float *attr_1,
-    float *attr_2,
-    float *attr_3,
-    float *attr_4,
-    float *attr_5,
-    float *attr_6,
-    int64_t *d_rank2id,
-    int64_t M1,
-    int64_t M2,
-    int64_t M3,
-    int64_t M4,
-    int64_t M5,
-    int64_t M6,
-    int64_t num_select,
-    float *dest_1,
-    float *dest_2,
-    float *dest_3,
-    float *dest_4,
-    float *dest_5,
-    float *dest_6
-) {
-    if (dir == 'f') {
-        int grid_size = 32;
-        int block_size = 256;
-
-        scattered_transfer_cpu2gpu<<<grid_size, block_size>>>(
-            attr_2,
-            attr_3,
-            attr_4,
-            attr_5,
-            attr_6,
-            M2,
-            M3,
-            M4,
-            M5,
-            M6,
-            d_rank2id,
-            num_select,
-            dest_2,
-            dest_3,
-            dest_4,
-            dest_5,
-            dest_6
-        );
-    }
-    else if (dir == 'b') {
-
-        int grid_size = 32;
-        int block_size = 256;
-
-        scattered_transfer_gpu2cpu<<<grid_size, block_size>>>(
-            attr_1,
-            attr_2,
-            attr_3,
-            attr_4,
-            attr_5,
-            attr_6,
-            M1,
-            M2,
-            M3,
-            M4,
-            M5,
-            M6,
-            d_rank2id,
-            num_select,
-            dest_1,
-            dest_2,
-            dest_3,
-            dest_4,
-            dest_5,
-            dest_6
-        );
-    }
+template <typename KernelFunc, typename... Args>
+void _launch_wrapper(KernelFunc kernel, int gridDim, int blockDim, Args... args) {
+    kernel<<<gridDim, blockDim>>>(args...);
 }
 
 void CudaRasterizer::Rasterizer::scattered_transfer(
@@ -430,31 +408,122 @@ void CudaRasterizer::Rasterizer::scattered_transfer(
 
     int64_t *d_rank2id;
     cudaMalloc(&d_rank2id, num_select * sizeof(int64_t));
-    CHECK_CUDA(launch_rank2id(d_mask, d_mask_presum, d_rank2id, N), debug)
-    
-    CHECK_CUDA(launch(
-        dir,
-        attr_1,
-        attr_2,
-        attr_3,
-        attr_4,
-        attr_5,
-        attr_6,
-        d_rank2id,
-        M1,
-        M2,
-        M3,
-        M4,
-        M5,
-        M6,
-        num_select,
-        dest_1,
-        dest_2,
-        dest_3,
-        dest_4,
-        dest_5,
-        dest_6
-    ), debug)
+    CHECK_CUDA(_launch_wrapper(get_rank2id, 64, 256, d_mask, d_mask_presum, d_rank2id, N), debug)
+
+    if (dir == 'f') {
+        int grid_size = 32;
+        int block_size = 256;
+
+        CHECK_CUDA(_launch_wrapper(scattered_transfer_cpu2gpu, grid_size, block_size,
+            attr_2,
+            attr_3,
+            attr_4,
+            attr_5,
+            attr_6,
+            M2,
+            M3,
+            M4,
+            M5,
+            M6,
+            d_rank2id,
+            num_select,
+            dest_2,
+            dest_3,
+            dest_4,
+            dest_5,
+            dest_6
+        ), debug)
+    }
+    else if (dir == 'b') {
+        int grid_size = 32;
+        int block_size = 256;
+
+        CHECK_CUDA(_launch_wrapper(scattered_transfer_gpu2cpu, grid_size, block_size,
+            attr_1,
+            attr_2,
+            attr_3,
+            attr_4,
+            attr_5,
+            attr_6,
+            M1,
+            M2,
+            M3,
+            M4,
+            M5,
+            M6,
+            d_rank2id,
+            num_select,
+            dest_1,
+            dest_2,
+            dest_3,
+            dest_4,
+            dest_5,
+            dest_6
+        ), debug)
+    }
+
+    cudaFree(d_mask_presum);
+    cudaFree(d_temp_storage);
+    cudaFree(d_rank2id);
+}
+
+void CudaRasterizer::Rasterizer::cat_transfer(
+    char dir,
+    float **d_scattr,
+    float *h_concat,
+    bool *d_mask,
+    int *dims,
+    int *dims_presum_rshift,
+    int *col2attr,
+    int n_col,
+    int64_t N,
+    int64_t num_select,
+    bool debug
+) {
+    // calculate rank2id
+    void     *d_temp_storage = NULL;
+    size_t   temp_storage_bytes = 0;
+    int64_t  *d_mask_presum;
+    cudaMalloc(&d_mask_presum, N * sizeof(int64_t));
+    cudaMemset(d_mask_presum, 0, N * sizeof(int64_t));
+    cub::DeviceScan::InclusiveSum(d_temp_storage, temp_storage_bytes, d_mask, d_mask_presum, N);
+    cudaMalloc(&d_temp_storage, temp_storage_bytes);
+    cub::DeviceScan::InclusiveSum(d_temp_storage, temp_storage_bytes, d_mask, d_mask_presum, N);
+
+    int64_t *d_rank2id;
+    cudaMalloc(&d_rank2id, num_select * sizeof(int64_t));
+    CHECK_CUDA(_launch_wrapper(get_rank2id, 64, 256, d_mask, d_mask_presum, d_rank2id, N), debug)
+
+    if (dir == 'f') {
+        int grid_size = 32;
+        int block_size = 256;
+
+        CHECK_CUDA(_launch_wrapper(cat_transfer_cpu2gpu, grid_size, block_size,
+            h_concat,
+            dims,
+            dims_presum_rshift,
+            col2attr,
+            n_col,
+            d_rank2id,
+            num_select,
+            d_scattr
+        ), debug)
+    }
+    else if (dir == 'b') {
+        int grid_size = 32;
+        int block_size = 256;
+
+        CHECK_CUDA(_launch_wrapper(cat_transfer_gpu2cpu, grid_size, block_size,
+            d_scattr,
+            dims,
+            dims_presum_rshift,
+            col2attr,
+            n_col,
+            d_rank2id,
+            num_select,
+            h_concat
+        ), debug)
+    }
 
     cudaFree(d_mask_presum);
     cudaFree(d_temp_storage);

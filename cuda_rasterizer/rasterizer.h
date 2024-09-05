@@ -67,6 +67,19 @@ namespace CudaRasterizer
             bool debug
         );
 
+        static void cat_transfer(
+            char dir,
+            float **d_scattr,
+            float *h_concat,
+            bool *d_mask,
+            int *dims,
+            int *dims_presum_rshift,
+            int *col2attr,
+            int n_col,
+            int64_t N,
+            int64_t num_select,
+            bool debug
+        );
 
 		/////////////////////////////// Preprocess ///////////////////////////////
 
