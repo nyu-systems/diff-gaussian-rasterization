@@ -83,6 +83,87 @@ __global__ void send2GpuKernel(int P,
 	present[idx] = send2gpu(idx, orig_points, viewmatrix, projmatrix, p_view);
 }
 
+// __forceinline__ __device__ bool send2gpu(
+//     int idx,
+// 	const float* orig_points,
+// 	const float* viewmatrix,
+// 	const float* projmatrix,
+// 	float3& p_view)
+// {
+// 	float3 p_orig = { orig_points[3 * idx], orig_points[3 * idx + 1], orig_points[3 * idx + 2] };
+
+// 	// Bring points to screen space
+// 	float4 p_hom = transformPoint4x4(p_orig, projmatrix);
+// 	float p_w = 1.0f / (p_hom.w + 0.0000001f);
+// 	float3 p_proj = { p_hom.x * p_w, p_hom.y * p_w, p_hom.z * p_w };
+// 	p_view = transformPoint4x3(p_orig, viewmatrix);
+
+//     return !(p_view.z <= 0.2f || ((p_proj.x < -1.3 || p_proj.x > 1.3 || p_proj.y < -1.3 || p_proj.y > 1.3)));
+// }
+
+// __global__ void exactsend2GpufilterKernel(int P,
+// 	const float* orig_points_cpu,
+// 	const float* parameters_cpu,
+// 	float* orig_points_gpu,
+// 	const float* viewmatrix,
+// 	const float* projmatrix,
+// 	bool* present)
+// {
+// 	auto idx = cg::this_grid().thread_rank();
+// 	if (idx >= P)
+// 		return;
+
+// 	float3 p_orig = ((float3*)orig_points_cpu)[idx];
+
+// 	// Bring points to screen space
+// 	float4 p_hom = transformPoint4x4(p_orig, projmatrix);
+// 	float p_w = 1.0f / (p_hom.w + 0.0000001f);
+// 	float3 p_proj = { p_hom.x * p_w, p_hom.y * p_w, p_hom.z * p_w };
+// 	float3 p_view = transformPoint4x3(p_orig, viewmatrix);
+
+// 	// check in frustum
+// 	if (!(p_view.z <= 0.2f || ((p_proj.x < -1.3 || p_proj.x > 1.3 || p_proj.y < -1.3 || p_proj.y > 1.3)))) {
+// 		((float3*)orig_points_gpu)[idx] = p_orig;
+		
+// 		// If 3D covariance matrix is precomputed, use it, otherwise compute
+// 		// from scaling and rotation parameters. 
+// 		const float* cov3D;
+// 		float scale_modifier = 1.0;
+// 		computeCov3D(scales[idx], scale_modifier, rotations[idx], cov3Ds + idx * 6);
+// 		cov3D = cov3Ds + idx * 6;
+
+// 		// Compute 2D screen-space covariance matrix
+// 		float3 cov = computeCov2D(p_orig, focal_x, focal_y, tan_fovx, tan_fovy, cov3D, viewmatrix);
+
+// 		// Invert covariance (EWA algorithm)
+// 		float det = (cov.x * cov.z - cov.y * cov.y);
+// 		if (det == 0.0f)
+// 			return;
+// 		float det_inv = 1.f / det;
+// 		float3 conic = { cov.z * det_inv, -cov.y * det_inv, cov.x * det_inv };
+
+// 		// Compute extent in screen space (by finding eigenvalues of
+// 		// 2D covariance matrix). Use extent to compute a bounding rectangle
+// 		// of screen-space tiles that this Gaussian overlaps with. Quit if
+// 		// rectangle covers 0 tiles. 
+// 		float mid = 0.5f * (cov.x + cov.z);
+// 		float lambda1 = mid + sqrt(max(0.1f, mid * mid - det));
+// 		float lambda2 = mid - sqrt(max(0.1f, mid * mid - det));
+// 		float my_radius = ceil(3.f * sqrt(max(lambda1, lambda2)));
+// 		float2 point_image = { ndc2Pix(p_proj.x, W), ndc2Pix(p_proj.y, H) };
+// 		uint2 rect_min, rect_max;
+// 		getRect(point_image, my_radius, rect_min, rect_max, grid);
+// 		if ((rect_max.x - rect_min.x) * (rect_max.y - rect_min.y) == 0)
+// 			return;
+		
+
+// 	} else {
+// 		present[idx] = false;
+// 	}
+
+// }
+
+
 __global__ void get_rank2id(bool *mask, int64_t *mask_presum, int64_t *rank2id, int64_t n_row) {
     int64_t n_threads = gridDim.x * blockDim.x;
     for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < n_row; i += n_threads) {
@@ -94,11 +175,11 @@ __global__ void get_rank2id(bool *mask, int64_t *mask_presum, int64_t *rank2id, 
 
 // Transfer attr to scattered dest.
 __global__ void scattered_transfer_cpu2gpu(
-    float *h_attr_1,
-    float *h_attr_2,
-    float *h_attr_3,
-    float *h_attr_4,
-    float *h_attr_5,
+    volatile float *h_attr_1,
+    volatile float *h_attr_2,
+    volatile float *h_attr_3,
+    volatile float *h_attr_4,
+    volatile float *h_attr_5,
     int64_t M1,
     int64_t M2,
     int64_t M3,
@@ -106,11 +187,11 @@ __global__ void scattered_transfer_cpu2gpu(
     int64_t M5,
     int64_t *rank2id,
     int64_t num_select,
-    float *d_dest_1,
-    float *d_dest_2,
-    float *d_dest_3,
-    float *d_dest_4,
-    float *d_dest_5
+    volatile float *d_dest_1,
+    volatile float *d_dest_2,
+    volatile float *d_dest_3,
+    volatile float *d_dest_4,
+    volatile float *d_dest_5
 ) {
     int64_t stride = gridDim.x * blockDim.x;
     int64_t total_elements = num_select * (M1 + M2 + M3 + M4 + M5);
@@ -148,12 +229,12 @@ __global__ void scattered_transfer_cpu2gpu(
 
 // Transfer attr to scattered dest.
 __global__ void scattered_transfer_gpu2cpu(
-    float *d_attr_1,
-    float *d_attr_2,
-    float *d_attr_3,
-    float *d_attr_4,
-    float *d_attr_5,
-    float *d_attr_6,
+    volatile float *d_attr_1,
+    volatile float *d_attr_2,
+    volatile float *d_attr_3,
+    volatile float *d_attr_4,
+    volatile float *d_attr_5,
+    volatile float *d_attr_6,
     int64_t M1,
     int64_t M2,
     int64_t M3,
@@ -162,12 +243,12 @@ __global__ void scattered_transfer_gpu2cpu(
     int64_t M6,
     int64_t *rank2id,
     int64_t num_select,
-    float *h_dest_1,
-    float *h_dest_2,
-    float *h_dest_3,
-    float *h_dest_4,
-    float *h_dest_5,
-    float *h_dest_6
+    volatile float *h_dest_1,
+    volatile float *h_dest_2,
+    volatile float *h_dest_3,
+    volatile float *h_dest_4,
+    volatile float *h_dest_5,
+    volatile float *h_dest_6
 ) {
     int64_t stride = gridDim.x * blockDim.x;
     int64_t total_elements = num_select * (M1 + M2 + M3 + M4 + M5 + M6);
@@ -209,7 +290,7 @@ __global__ void scattered_transfer_gpu2cpu(
 }
 
 __global__ void cat_transfer_cpu2gpu(
-    float *h_srce,
+    volatile float *h_srce,
     int *dims,
     int *dims_presum_rshift,
     int *col2attr,
@@ -217,6 +298,7 @@ __global__ void cat_transfer_cpu2gpu(
     int64_t *rank2id,
     int64_t num_select,
     float **d_dest
+	// volatile float *volatile *d_dest
 ) {
     int64_t stride = gridDim.x * blockDim.x;
     int64_t total_elements = num_select * n_col;
@@ -238,14 +320,15 @@ __global__ void cat_transfer_cpu2gpu(
 }
 
 __global__ void cat_transfer_gpu2cpu(
+    // volatile float *volatile *d_srce,
     float **d_srce,
-    int *dims,
+	int *dims,
     int *dims_presum_rshift,
     int *col2attr,
     int n_col,
     int64_t *rank2id,
     int64_t num_select,
-    float *h_dest
+    volatile float *h_dest
 ) {
     int64_t stride = gridDim.x * blockDim.x;
     int64_t total_elements = num_select * n_col;
@@ -365,6 +448,25 @@ void CudaRasterizer::Rasterizer::getSend2Gpu(
         projmatrix,
 		present);
 }
+
+// void CudaRasterizer::Rasterizer::getExactSend2GpuFilter(
+// 	int P,
+// 	float* means3D_cpu,
+// 	float* parameters_cpu,
+// 	float* means3D_gpu,
+// 	float* viewmatrix,
+// 	float* projmatrix,
+// 	bool* present)
+// {
+// 	exactsend2GpufilterKernel<<<(P + ONE_DIM_BLOCK_SIZE - 1) / ONE_DIM_BLOCK_SIZE, ONE_DIM_BLOCK_SIZE>>>(
+// 		P,
+// 		means3D_cpu,
+// 		parameters_cpu,
+// 		means3D_gpu,
+// 		viewmatrix,
+//         projmatrix,
+// 		present);
+// }
 
 template <typename KernelFunc, typename... Args>
 void _launch_wrapper(KernelFunc kernel, int gridDim, int blockDim, Args... args) {
@@ -524,6 +626,8 @@ void CudaRasterizer::Rasterizer::cat_transfer(
             h_concat
         ), debug)
     }
+
+	cudaDeviceSynchronize();
 
     cudaFree(d_mask_presum);
     cudaFree(d_temp_storage);

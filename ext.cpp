@@ -32,6 +32,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("get_block_XY", &GetBlockXY);
 
   m.def("get_send2gpu", &GetSend2GpuCUDA);
+  // m.def("get_exact_send2gpu_filter", &GetExactSend2GpuFilterCUDA);
   m.def("send2gpu", &Send2GpuCUDA);
   m.def("send_cat2gpu", &SendCat2GpuCUDA);
   m.def("send_cat2gpu_buffer", &SendCat2GpuBufferCUDA);

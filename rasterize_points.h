@@ -26,6 +26,12 @@ torch::Tensor GetSend2GpuCUDA(
     torch::Tensor& viewmatrix,
     torch::Tensor& projmatrix);
 
+// torch::Tensor GetExactSend2GpuFilterCUDA(
+//     torch::Tensor& means3D,
+// 	torch::Tensor& parameters,
+//     torch::Tensor& viewmatrix,
+//     torch::Tensor& projmatrix);
+
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 Send2GpuCUDA(
     torch::Tensor& opacities,

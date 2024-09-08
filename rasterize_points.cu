@@ -79,6 +79,31 @@ torch::Tensor GetSend2GpuCUDA(
     return present;
 }
 
+// torch::Tensor GetExactSend2GpuFilterCUDA(
+//     torch::Tensor& means3D_cpu,
+// 	torch::Tensor& parameters_cpu,
+//     torch::Tensor& viewmatrix,
+//     torch::Tensor& projmatrix)
+// {
+// 	const int P = means3D.size(0);
+
+//     torch::Tensor present = torch::full({P}, false, means3D.options().dtype(at::kBool));
+// 	torch::Tensor means3D_gpu = torch::empty({P, 3}, 0.0, means3D.options().device(torch::kCUDA));
+
+//     if(P != 0) {
+//         CudaRasterizer::Rasterizer::getExactSend2GpuFilter(
+//             P,
+// 		    means3D_cpu.contiguous().data<float>(),
+// 			parameters_cpu.contiguous().data<float>(),
+// 			means3D_gpu.contiguous().data<float>(),
+// 		    viewmatrix.contiguous().data<float>(),
+// 		    projmatrix.contiguous().data<float>(),
+// 		    present.contiguous().data<bool>());
+//     }
+  
+//     return present;
+// }
+
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 Send2GpuCUDA(
     torch::Tensor& opacities,
@@ -177,8 +202,12 @@ SendCat2GpuCUDA(
         n_col,
         N,
         num_select,
-        false
+        true
     );
+
+    cudaDeviceSynchronize();
+	cudaFreeHost(h_parameters);
+    cudaFree(d_parameters);
 
     return std::make_tuple(d_opacities, d_scales, d_rotations, d_features_dc, d_features_rest);
 }
@@ -222,8 +251,11 @@ void SendCat2GpuBufferCUDA(
         n_col,
         N,
         num_select,
-        false
+        true
     );
+    cudaDeviceSynchronize();
+	cudaFreeHost(h_parameters);
+    cudaFree(d_parameters);
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
@@ -415,6 +447,10 @@ torch::Tensor Send2CpuCatCUDA(
         false
     );
 
+	cudaDeviceSynchronize();
+	cudaFreeHost(h_param_ptrs);
+    cudaFree(d_param_ptrs);
+
     return dparameters;
 }
 
@@ -459,8 +495,13 @@ void Send2CpuCatBufferCUDA(
         n_col,
         N,
         num_select,
-        false
+        true
     );
+
+    cudaDeviceSynchronize();
+	cudaFreeHost(h_param_ptrs);// is it possible that this is freed from cpu-side and the memory is still being used from gpu-side?
+    cudaFree(d_param_ptrs);
+
 }
 
 

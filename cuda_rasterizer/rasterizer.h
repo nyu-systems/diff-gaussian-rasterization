@@ -41,6 +41,15 @@ namespace CudaRasterizer
             float* projmatrix,
             bool* present);
 
+		static void getExactSend2GpuFilter(
+			int P,
+			float* means3D_cpu,
+			float* parameters_cpu,
+			float* means3D_gpu,
+			float* viewmatrix,
+            float* projmatrix,
+            bool* present);
+
         static void scattered_transfer(
             char dir,
             float *attr_1,

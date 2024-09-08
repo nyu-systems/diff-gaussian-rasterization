@@ -494,6 +494,21 @@ def get_send2gpu(
         projmatrix
     )
 
+# def get_exact_send2gpu_filter(
+#     means3D,
+#     parameters,
+#     viewmatrix,
+#     projmatrix
+# ):
+#     assert means3D.is_pinned() and means3D.is_contiguous()
+#     assert parameters.is_pinned() and parameters.is_contiguous()
+    
+#     return _C.get_exact_send2gpu_filter(
+#         means3D,
+#         viewmatrix,
+#         projmatrix
+#     )
+
 def send2gpu(
     opacities,
     scales,
