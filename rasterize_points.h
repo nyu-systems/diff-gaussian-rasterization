@@ -105,6 +105,22 @@ void Send2CpuCatBufferCUDA(
     torch::Tensor& col2attr,
     torch::Tensor& h_dparameters);
 
+
+////////////////////////////////// Loss //////////////////////////////////
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+FusedLossCUDA(
+    const torch::Tensor& image,
+    const torch::Tensor& gt_image,
+    const torch::Tensor& mask,
+    const torch::Tensor& mu1,
+    const torch::Tensor& mu2,
+    const torch::Tensor& sigma1_sq,
+    const torch::Tensor& sigma2_sq,
+    const torch::Tensor& sigma12);
+
+
+
 /////////////////////////////// Preprocess ///////////////////////////////
 
 

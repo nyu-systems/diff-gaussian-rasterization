@@ -17,6 +17,7 @@
 #include <numeric>
 #include <string>
 #include <cstdlib>
+#include <cmath>
 #include <chrono>
 #include <cuda.h>
 #include "cuda_runtime.h"
@@ -336,6 +337,85 @@ __global__ void identifyTileRanges(int L, uint64_t* point_list_keys, uint2* rang
 		ranges[currtile].y = L;
 }
 
+__global__ void L1LossKernel(
+    const float *image,
+    const float *gt_image,
+    const bool *mask,
+    const int channels,
+    const int height,
+    const int width,
+    float *l1_tensor,
+    float *dimage)
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int c = blockIdx.z;
+
+    if (x < width && y < height && c < channels) {
+        int index = c * width * height + y * width + x;
+        float sub = image[index] - gt_image[index];
+        l1_tensor[index] = std::abs(sub) * mask[y * width + x];
+        dimage[index] = (sub >= 0 ? 1.0f : -1.0f) * mask[y * width + x];
+        // dimage[index] = sub std::abs(image[index] - gt_image[index]) / (image[index] - gt_image[index]);
+    }
+}
+
+__global__ void SSIMLossKernel(
+    const float *mu1_tensor,
+    const float *mu2_tensor,
+    const float *sigma1_sq_tensor,
+    const float *sigma2_sq_tensor,
+    const float *sigma12_tensor,
+    const bool *mask,
+    const int channels,
+    const int height,
+    const int width,
+    float *ssim_tensor,
+    float *dmu1,
+    float *dmu2,
+    float *dsigma1_sq,
+    float *dsigma2_sq,
+    float *dsigma12)
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int c = blockIdx.z;
+
+    const float C1 = 0.01 * 0.01;
+    const float C2 = 0.03 * 0.03;
+
+    if (x < width && y < height && c < channels) {
+        int index = c * width * height + y * width + x;
+        float mu1 = mu1_tensor[index];
+        float mu2 = mu2_tensor[index];
+
+        float mu1_sq = mu1 * mu1;
+        float mu2_sq = mu2 * mu2;
+        float mu1_mu2 = mu1 * mu2;
+
+        float sigma1_sq = sigma1_sq_tensor[index] - mu1_sq;
+        float sigma2_sq = sigma2_sq_tensor[index] - mu2_sq;
+        float sigma12 = sigma12_tensor[index] - mu1_mu2;
+
+        float A = 2 * mu1_mu2 + C1;
+        float B = 2 * sigma12 + C2;
+        float C = mu1_sq + mu2_sq + C1;
+        float D = sigma1_sq + sigma2_sq + C2;
+        
+        //               (2 * mu1_mu2 + C1) * (2 * sigma12 + C2)
+        // SSIM = --------------------------------------------------------
+        //         (mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2)
+        float ssim = (A * B) / (C * D);
+        ssim_tensor[index] = mask[y * width + x] * ssim;
+
+        dmu1[index] = mask[y * width + x] * ((B * 2 * mu2) / (C * D) - (A * 2 * mu2) / (C * D) - (A * B * 2 * mu1) / (C * C * D) + (A * B * 2 * mu1) / (C * D * D));
+        dmu2[index] = mask[y * width + x] * ((B * 2 * mu1) / (C * D) - (A * 2 * mu1) / (C * D) - (A * B * 2 * mu2) / (C * C * D) + (A * B * 2 * mu2) / (C * D * D));
+        dsigma1_sq[index] = mask[y * width + x] * (-1) * (A * B) / (C * D * D);
+        dsigma2_sq[index] = mask[y * width + x] * (-1) * (A * B) / (C * D * D);
+        dsigma12[index] = mask[y * width + x] * (A * 2) / (C * D);
+    }
+}
+
 // Mark Gaussians as visible/invisible, based on view frustum testing
 void CudaRasterizer::Rasterizer::markVisible(
 	int P,
@@ -368,6 +448,11 @@ void CudaRasterizer::Rasterizer::getSend2Gpu(
 
 template <typename KernelFunc, typename... Args>
 void _launch_wrapper(KernelFunc kernel, int gridDim, int blockDim, Args... args) {
+    kernel<<<gridDim, blockDim>>>(args...);
+}
+
+template <typename KernelFunc, typename... Args>
+void _launch_wrapper(KernelFunc kernel, dim3 gridDim, dim3 blockDim, Args... args) {
     kernel<<<gridDim, blockDim>>>(args...);
 }
 
@@ -668,6 +753,66 @@ void save_log_in_file(int iteration, int global_rank, int world_size, std::strin
 	outfile << "iteration: " << iteration << ", " << log_content << "\n";
 	outfile.close();
 	delete[] filename;
+}
+
+
+///////////////////////////////// Loss ///////////////////////////////////
+
+void CudaRasterizer::Rasterizer::lossForwardBackward(
+    const float *image,
+    const float *gt_image,
+    const bool *mask,
+    const float *mu1,
+    const float *mu2,
+    const float *sigma1_sq,
+    const float *sigma2_sq,
+    const float *sigma12,
+    const int C,
+    const int H,
+    const int W,
+    float *l1,
+    float *ssim,
+    float *dl1_dimage,
+    float *dssim_dmu1,
+    float *dssim_dmu2,
+    float *dssim_dsigma1_sq,
+    float *dssim_dsigma2_sq,
+    float *dssim_dsigma12,
+    bool debug)
+{
+    dim3 dimBlock(32, 32);
+    dim3 dimGrid((W + dimBlock.x - 1) / dimBlock.x, (H + dimBlock.y - 1) / dimBlock.y, C);
+
+    // L1 loss forward & backward
+    CHECK_CUDA(_launch_wrapper(L1LossKernel, dimGrid, dimBlock,
+        image,
+        gt_image,
+        mask,
+        C,
+        H,
+        W,
+        l1,
+        dl1_dimage
+    ), debug)
+
+    // SSIM loss forward & backward
+    CHECK_CUDA(_launch_wrapper(SSIMLossKernel, dimGrid, dimBlock,
+        mu1,
+        mu2,
+        sigma1_sq,
+        sigma2_sq,
+        sigma12,
+        mask,
+        C,
+        H,
+        W,
+        ssim,
+        dssim_dmu1,
+        dssim_dmu2,
+        dssim_dsigma1_sq,
+        dssim_dsigma2_sq,
+        dssim_dsigma12
+    ), debug)
 }
 
 
