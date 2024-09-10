@@ -43,6 +43,22 @@ SendCat2GpuCUDA(
     torch::Tensor& dims_presum_shift,
     torch::Tensor& col2attr);
 
+torch::Tensor SendCat2GpuXYZCUDA(
+    torch::Tensor& parameters);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+SendCat2GpuOSRCUDA(
+    torch::Tensor& parameters,
+    torch::Tensor& mask,
+    torch::Tensor& mask_indices,
+	torch::Tensor& dims,
+    torch::Tensor& dims_presum_shift,
+    torch::Tensor& col2attr);
+
+torch::Tensor SendCat2GpuSHSCUDA(
+    torch::Tensor& parameters,
+    torch::Tensor& mask_indices);
+
 void SendCat2GpuBufferCUDA(
     torch::Tensor& parameters,
     torch::Tensor& mask,
@@ -54,6 +70,19 @@ void SendCat2GpuBufferCUDA(
     torch::Tensor& d_rotations,
     torch::Tensor& d_features_dc,
     torch::Tensor& d_features_rest);
+
+void Send2CpuCatBufferOSRSHSCUDA(
+    torch::Tensor& dmeans3D,
+    torch::Tensor& dopacities,
+    torch::Tensor& dscales,
+    torch::Tensor& drotations,
+    torch::Tensor& dshs,
+    torch::Tensor& infrustum_radii_opacities_filter_indices,
+    torch::Tensor& send2gpu_final_filter_indices,
+	torch::Tensor& dims,
+    torch::Tensor& dims_presum_shift,
+    torch::Tensor& col2attr,
+    torch::Tensor& h_dparameters);
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 Send2CpuCUDA_deprecated(

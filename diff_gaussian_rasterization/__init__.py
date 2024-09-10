@@ -494,6 +494,25 @@ def get_send2gpu(
         projmatrix
     )
 
+# def get_send2gpu_final_filter(
+#     means3D_all,
+#     filtered_opacities,
+#     filtered_scales,
+#     filtered_rotations,
+#     infrustum_filter_indices,
+#     viewmatrix,
+#     projmatrix,
+# ):
+#     return _C.get_send2gpu_final_filter(
+#         means3D_all,
+#         filtered_opacities,
+#         filtered_scales,
+#         filtered_rotations,
+#         infrustum_filter_indices,
+#         viewmatrix,
+#         projmatrix,
+#     )
+
 def send2gpu(
     opacities,
     scales,
@@ -604,6 +623,52 @@ def send_cat2gpu(
         col2attr
     )
 
+def send_cat2gpu_xyz(
+    parameters,
+):
+    assert parameters.is_pinned()
+    
+    return _C.send_cat2gpu_xyz(
+        parameters,
+    )
+
+def send_cat2gpu_osr(
+    parameters,
+    mask,
+    mask_indices,
+    dims,
+    dims_presum_rshift,
+    col2attr
+):
+    assert parameters.is_pinned()
+    assert mask.is_cuda
+    assert mask_indices.is_cuda
+    assert dims.is_cuda
+    assert dims_presum_rshift.is_cuda
+    assert col2attr.is_cuda
+    
+    return _C.send_cat2gpu_osr(
+        parameters,
+        mask,
+        mask_indices,
+        dims,
+        dims_presum_rshift,
+        col2attr
+    )
+
+def send_cat2gpu_shs(
+    parameters,
+    mask_indices,
+):
+    assert parameters.is_pinned()
+    assert mask_indices.is_cuda
+    
+    return _C.send_cat2gpu_shs(
+        parameters,
+        mask_indices
+    )
+
+
 def send2cpu_cat_buffer(
     dmeans3D,
     dopacities,
@@ -637,6 +702,45 @@ def send2cpu_cat_buffer(
         dfeatures_dc,
         dfeatures_rest,
         mask,
+        dims,
+        dims_presum_rshift,
+        col2attr,
+        h_dparameters
+    )
+
+def send2cpu_cat_buffer_osr_shs(
+    dmeans3D,
+    dopacities,
+    dscales,
+    drotations,
+    dshs,
+    infrustum_radii_opacities_filter_indices,
+    send2gpu_final_filter_indices,
+    dims,
+    dims_presum_rshift,
+    col2attr,
+    h_dparameters
+):
+    assert dmeans3D.is_cuda
+    assert dopacities.is_cuda
+    assert dscales.is_cuda
+    assert drotations.is_cuda
+    assert dshs.is_cuda
+    assert infrustum_radii_opacities_filter_indices.is_cuda
+    assert send2gpu_final_filter_indices.is_cuda
+    assert dims.is_cuda
+    assert dims_presum_rshift.is_cuda
+    assert col2attr.is_cuda
+    assert h_dparameters.is_pinned()
+    
+    return _C.send2cpu_cat_buffer_osr_shs(
+        dmeans3D,
+        dopacities,
+        dscales,
+        drotations,
+        dshs,
+        infrustum_radii_opacities_filter_indices,
+        send2gpu_final_filter_indices,
         dims,
         dims_presum_rshift,
         col2attr,

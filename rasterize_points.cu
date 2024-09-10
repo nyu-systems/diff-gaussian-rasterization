@@ -183,6 +183,100 @@ SendCat2GpuCUDA(
     return std::make_tuple(d_opacities, d_scales, d_rotations, d_features_dc, d_features_rest);
 }
 
+template <typename... Args>
+void allocateParametersPointers(float**& d_parameters, int n_pointers, Args&&... pointers) {
+   cudaMalloc(reinterpret_cast<void**>(&d_parameters), n_pointers * sizeof(float*));
+   float* host_pointers[] = {std::forward<Args>(pointers)...};
+   cudaMemcpy(d_parameters, host_pointers, n_pointers * sizeof(float*), cudaMemcpyHostToDevice);
+}
+
+torch::Tensor SendCat2GpuXYZCUDA(
+    torch::Tensor& parameters)
+{
+	int64_t N = parameters.size(0);
+
+    auto options = torch::TensorOptions().device(torch::kCUDA);
+    torch::Tensor d_xyz = torch::empty({N, 3}, options);
+
+    CudaRasterizer::Rasterizer::cat_transfer_xyz(
+        d_xyz.contiguous().data<float>(),
+        parameters.contiguous().data<float>(),
+        N,
+        false
+    );
+
+    return d_xyz;
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+SendCat2GpuOSRCUDA(
+    torch::Tensor& parameters,
+    torch::Tensor& mask,
+    torch::Tensor& mask_indices,
+	torch::Tensor& dims,
+    torch::Tensor& dims_presum_shift,
+    torch::Tensor& col2attr)
+{
+	int64_t N = mask.size(0);
+    int64_t num_select = mask_indices.size(0);
+
+    auto options = torch::TensorOptions().device(torch::kCUDA);
+    torch::Tensor d_opacities = torch::empty({num_select, 1}, options);
+    torch::Tensor d_scales = torch::empty({num_select, 3}, options);
+    torch::Tensor d_rotations = torch::empty({num_select, 4}, options);
+
+	int n_all_col = parameters.size(1);
+	int n_load_col = d_opacities.size(1) + d_scales.size(1) + d_rotations.size(1);
+
+    float **d_parameters;
+    allocateParametersPointers(d_parameters, 3,
+		d_opacities.contiguous().data<float>(),
+		d_scales.contiguous().data<float>(),
+		d_rotations.contiguous().data<float>());
+
+    CudaRasterizer::Rasterizer::cat_transfer_osr(
+        d_parameters,
+        parameters.contiguous().data<float>(),
+        mask.contiguous().data<bool>(),
+		mask_indices.contiguous().data<int64_t>(),
+        dims.contiguous().data<int>(),
+        dims_presum_shift.contiguous().data<int>(),
+        col2attr.contiguous().data<int>(),
+        n_all_col,
+		n_load_col,
+        N,
+        num_select,
+        false
+    );
+
+	cudaDeviceSynchronize();
+	cudaFree(d_parameters);
+
+    return std::make_tuple(d_opacities, d_scales, d_rotations);
+}
+
+torch::Tensor SendCat2GpuSHSCUDA(
+    torch::Tensor& parameters,
+    torch::Tensor& mask_indices)
+{
+	int64_t N = parameters.size(0);
+    int64_t num_select = mask_indices.size(0);
+
+    auto options = torch::TensorOptions().device(torch::kCUDA);
+    torch::Tensor d_shs = torch::empty({num_select, 48}, options);
+
+	CudaRasterizer::Rasterizer::cat_transfer_shs(
+		d_shs.contiguous().data<float>(),
+        parameters.contiguous().data<float>(),
+		mask_indices.contiguous().data<int64_t>(),
+        N,
+        num_select,
+        false
+    );
+
+    return d_shs;
+}
+
 void SendCat2GpuBufferCUDA(
     torch::Tensor& parameters,
     torch::Tensor& mask,
@@ -461,6 +555,46 @@ void Send2CpuCatBufferCUDA(
         num_select,
         false
     );
+}
+
+void Send2CpuCatBufferOSRSHSCUDA(
+    torch::Tensor& dmeans3D,
+    torch::Tensor& dopacities,
+    torch::Tensor& dscales,
+    torch::Tensor& drotations,
+    torch::Tensor& dshs,
+    torch::Tensor& infrustum_radii_opacities_filter_indices,
+    torch::Tensor& send2gpu_final_filter_indices,
+	torch::Tensor& dims,
+    torch::Tensor& dims_presum_shift,
+    torch::Tensor& col2attr,
+    torch::Tensor& h_dparameters)
+{
+	int64_t N = h_dparameters.size(0);
+	int64_t num_select = send2gpu_final_filter_indices.size(0);
+
+    float **d_param_ptrs;
+    allocateParametersPointers(d_param_ptrs, 5,
+		dmeans3D.contiguous().data<float>(),
+		dopacities.contiguous().data<float>(),
+		dscales.contiguous().data<float>(),
+		drotations.contiguous().data<float>(),
+		dshs.contiguous().data<float>());
+
+    CudaRasterizer::Rasterizer::cat_transfer_gpu2cpu_osr_shs(
+        d_param_ptrs,
+        h_dparameters.contiguous().data<float>(),
+        infrustum_radii_opacities_filter_indices.contiguous().data<int64_t>(),
+		send2gpu_final_filter_indices.contiguous().data<int64_t>(),
+        dims.contiguous().data<int>(),
+        dims_presum_shift.contiguous().data<int>(),
+        col2attr.contiguous().data<int>(),
+        num_select,
+        false
+    );
+
+	cudaDeviceSynchronize();
+	cudaFree(d_param_ptrs);
 }
 
 

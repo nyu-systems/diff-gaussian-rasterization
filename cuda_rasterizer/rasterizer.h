@@ -81,6 +81,48 @@ namespace CudaRasterizer
             bool debug
         );
 
+		static void cat_transfer_xyz(
+			float *d_xyz,
+			float *h_concat,
+			int64_t N,
+			bool debug
+		);
+
+		static void cat_transfer_osr(
+			float **d_scattr,
+			float *h_concat,
+			bool *d_mask,
+			int64_t *d_mask_indices,
+			int *dims,
+			int *dims_presum_rshift,
+			int *col2attr,
+			int n_all_col,
+			int n_load_col,
+			int64_t N,
+			int64_t num_select,
+			bool debug
+		);
+
+		static void cat_transfer_shs(
+			float *d_shs,
+			float *h_concat,
+			int64_t *d_mask_indices,
+			int64_t N,
+			int64_t num_select,
+			bool debug
+		);
+
+		static void cat_transfer_gpu2cpu_osr_shs(
+			float **d_srce,
+			float *h_dest,
+			int64_t *infrustum_radii_opacities_filter_indices,
+			int64_t *send2gpu_final_filter_indices,
+			int *dims,
+			int *dims_presum_rshift,
+			int *col2attr,
+			int64_t num_select,
+			bool debug
+		);
 		/////////////////////////////// Preprocess ///////////////////////////////
 
 

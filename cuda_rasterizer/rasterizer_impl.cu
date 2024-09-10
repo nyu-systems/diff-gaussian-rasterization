@@ -531,6 +531,191 @@ void CudaRasterizer::Rasterizer::cat_transfer(
 }
 
 
+__global__ void cat_transfer_xyz_cpu2gpu_kernel(
+	float *h_concat,
+	int64_t N,
+	float *d_xyz
+) {
+	int64_t stride = gridDim.x * blockDim.x;
+	int64_t total_elements = N * 3;
+
+	for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < total_elements; i += stride) {
+		int64_t row = i / 3;
+		int col = i % 3;
+
+		d_xyz[row * 3 + col] = h_concat[row * 59 + col];
+	}
+}
+
+void CudaRasterizer::Rasterizer::cat_transfer_xyz(
+    float *d_xyz,
+    float *h_concat,
+    int64_t N,
+    bool debug
+) {
+	int grid_size = 32;
+	int block_size = 256;
+
+	CHECK_CUDA(_launch_wrapper(cat_transfer_xyz_cpu2gpu_kernel, grid_size, block_size,
+		h_concat,
+		N,
+		d_xyz
+	), debug)
+}
+
+
+__global__ void cat_transfer_osr_cpu2gpu_kernel(
+    float *h_srce,
+    int *dims,
+    int *dims_presum_rshift,
+    int *col2attr,
+    int n_all_col,
+	int n_load_col,
+    int64_t *rank2id,
+    int64_t num_select,
+    float **d_dest
+) {
+    int64_t stride = gridDim.x * blockDim.x;
+    int64_t total_elements = num_select * n_load_col;
+
+    for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < total_elements; i += stride) {
+
+		int64_t row = i / n_load_col;
+        int col = i % n_load_col;
+		int attr = col2attr[col];
+
+		int64_t offset_srce = rank2id[row] * n_all_col + 3 + col; // offset is 3 because the first 3 columns are x, y, z
+		int64_t offset_dest = row * dims[attr] + col - dims_presum_rshift[attr];
+
+		d_dest[attr][offset_dest] = h_srce[offset_srce];
+    }
+}
+
+void CudaRasterizer::Rasterizer::cat_transfer_osr(
+    float **d_scattr,
+    float *h_concat,
+    bool *d_mask,
+	int64_t *d_mask_indices,
+    int *dims,
+    int *dims_presum_rshift,
+    int *col2attr,
+    int n_all_col,
+    int n_load_col,
+    int64_t N,
+    int64_t num_select,
+    bool debug
+) {
+	int grid_size = 32;
+	int block_size = 256;
+
+	CHECK_CUDA(_launch_wrapper(cat_transfer_osr_cpu2gpu_kernel, grid_size, block_size,
+		h_concat,
+		dims,
+		dims_presum_rshift,
+		col2attr,
+		n_all_col,
+		n_load_col,
+		d_mask_indices,
+		num_select,
+		d_scattr
+	), debug)
+}
+
+__global__ void cat_transfer_shs_cpu2gpu_kernel(
+    const float *h_srce,
+    const int64_t *rank2id,
+    int64_t num_select,
+    float *d_shs
+) {
+    int64_t stride = gridDim.x * blockDim.x;
+    int64_t total_elements = num_select * 48;
+
+    for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < total_elements; i += stride) {
+
+		int64_t row = i / 48;
+        int col = i % 48;
+
+		int64_t offset_srce = rank2id[row] * 59 + 11 + col; // offset is 3 because the first 3 columns are x, y, z
+		int64_t offset_dest = row * 48 + col;
+
+		d_shs[offset_dest] = h_srce[offset_srce];
+    }
+}
+
+void CudaRasterizer::Rasterizer::cat_transfer_shs(
+    float *d_shs,
+    float *h_concat,
+	int64_t *d_mask_indices,
+    int64_t N,
+    int64_t num_select,
+    bool debug
+) {
+	int grid_size = 32;
+	int block_size = 256;
+
+	CHECK_CUDA(_launch_wrapper(cat_transfer_shs_cpu2gpu_kernel, grid_size, block_size,
+		h_concat,
+		d_mask_indices,
+		num_select,
+		d_shs
+	), debug)
+}
+
+__global__ void cat_transfer_gpu2cpu_osr_shs_kernel(
+	float **d_srce,
+	int64_t *infrustum_radii_opacities_filter_indices,
+	int64_t *send2gpu_final_filter_indices,
+	int *dims,
+	int *dims_presum_rshift,
+	int *col2attr,
+	int64_t num_select,
+	float *h_dest
+) {
+	int64_t stride = gridDim.x * blockDim.x;
+	int64_t total_elements = num_select * 59;
+
+	for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < total_elements; i += stride) {
+		int64_t row = i / 59;
+		int col = i % 59;
+		int attr = col2attr[col];
+
+		int64_t offset_dest = send2gpu_final_filter_indices[row] * 59 + col;
+
+		if (attr < 4) row = infrustum_radii_opacities_filter_indices[row];
+		int64_t offset_srce = row * dims[attr] + col - dims_presum_rshift[attr];
+
+		h_dest[offset_dest] = d_srce[attr][offset_srce];
+	}
+}
+
+void CudaRasterizer::Rasterizer::cat_transfer_gpu2cpu_osr_shs(
+	float **d_srce,
+	float *h_dest,
+	int64_t *infrustum_radii_opacities_filter_indices,
+	int64_t *send2gpu_final_filter_indices,
+	int *dims,
+	int *dims_presum_rshift,
+	int *col2attr,
+	int64_t num_select,
+	bool debug
+) {
+	int grid_size = 32;
+	int block_size = 256;
+
+	CHECK_CUDA(_launch_wrapper(cat_transfer_gpu2cpu_osr_shs_kernel, grid_size, block_size,
+		d_srce,
+		infrustum_radii_opacities_filter_indices,
+		send2gpu_final_filter_indices,
+		dims,
+		dims_presum_rshift,
+		col2attr,
+		num_select,
+		h_dest
+	), debug)
+}
+
+
+
 CudaRasterizer::GeometryState CudaRasterizer::GeometryState::fromChunk(char*& chunk, size_t P, bool sep_rendering=false)
 {
 	GeometryState geom;
