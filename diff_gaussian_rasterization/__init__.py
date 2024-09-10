@@ -14,6 +14,8 @@ import torch.nn as nn
 import torch
 from . import _C
 import time
+import torch.nn.functional as F
+from utils.loss_utils import create_window
 
 def cpu_deep_copy_tuple(input_tuple):
     copied_tensors = [item.cpu().clone() if isinstance(item, torch.Tensor) else item for item in input_tuple]
@@ -281,6 +283,80 @@ class _RenderGaussians(torch.autograd.Function):
 
         return grads
 
+
+
+
+
+############################# Loss #############################
+
+def fused_loss_computation(
+    image,
+    gt_image,
+    mask,
+    lambda_dssim=0.2,
+    window_size=11
+):
+    assert gt_image.shape == image.shape
+    assert mask.shape[0] == image.shape[1]
+    assert mask.shape[1] == image.shape[2]
+    
+    channel = image.size(-3)
+    window = create_window(window_size, channel)
+    if image.is_cuda:
+        window = window.cuda(image.get_device())
+    window = window.type_as(image)
+    mu1 = F.conv2d(image, window, padding=window_size // 2, groups=channel)
+    mu2 = F.conv2d(gt_image, window, padding=window_size // 2, groups=channel)
+
+    sigma1_sq = F.conv2d(image * image, window, padding=window_size // 2, groups=channel)
+    sigma2_sq = F.conv2d(gt_image * gt_image, window, padding=window_size // 2, groups=channel)
+    sigma12 = F.conv2d(image * gt_image, window, padding=window_size // 2, groups=channel)
+    
+    return _FusedLoss.apply(image, gt_image, mask, mu1, mu2, sigma1_sq, sigma2_sq, sigma12, lambda_dssim)
+
+class _FusedLoss(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, image, gt_image, mask, mu1, mu2, sigma1_sq, sigma2_sq, sigma12, lambda_dssim):
+        args = (
+            image,
+            gt_image,
+            mask,
+            mu1,
+            mu2,
+            sigma1_sq,
+            sigma2_sq,
+            sigma12
+        )
+        
+        l1_pixelwise, ssim_pixelwise, dl1_dimage, dssim_dmu1, dssim_dmu2, dssim_dsigma1_sq, dssim_dsigma2_sq, dssim_dsigma12 = _C.fused_loss(*args)
+        ctx.save_for_backward(dl1_dimage, dssim_dmu1, dssim_dmu2, dssim_dsigma1_sq, dssim_dsigma2_sq, dssim_dsigma12)
+        
+        return l1_pixelwise, ssim_pixelwise
+    
+    @staticmethod
+    def backward(ctx, dl1, dssim):
+        (dl1_dimage, dssim_dmu1, dssim_dmu2, dssim_dsigma1_sq, dssim_dsigma2_sq, dssim_dsigma12) = ctx.saved_tensors
+        
+        dimage = dl1_dimage * dl1
+        dmu1 = dssim_dmu1 * dssim
+        dmu2 = dssim_dmu2 * dssim
+        dsigma1_sq = dssim_dsigma1_sq * dssim
+        dsigma2_sq = dssim_dsigma2_sq * dssim
+        dsigma12 = dssim_dsigma12 * dssim
+
+        grads = (
+            dimage,
+            None,
+            None,
+            dmu1,
+            dmu2,
+            dsigma1_sq,
+            dsigma2_sq,
+            dsigma12,
+            None
+        )
+        
+        return grads
 
 
 

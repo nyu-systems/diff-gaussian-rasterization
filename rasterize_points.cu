@@ -597,6 +597,58 @@ void Send2CpuCatBufferOSRSHSCUDA(
 	cudaFree(d_param_ptrs);
 }
 
+////////////////////////////////// Loss //////////////////////////////////
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+FusedLossCUDA(
+    const torch::Tensor& image,
+    const torch::Tensor& gt_image,
+    const torch::Tensor& mask,
+    const torch::Tensor& mu1,
+    const torch::Tensor& mu2,
+    const torch::Tensor& sigma1_sq,
+    const torch::Tensor& sigma2_sq,
+    const torch::Tensor& sigma12)
+{
+    int C = image.size(0);
+    int H = image.size(1);
+    int W = image.size(2);
+
+    torch::Tensor dl1_dimage = torch::zeros({C, H, W}, image.options());
+    torch::Tensor dssim_dmu1 = torch::zeros({C, H, W}, mu1.options());
+    torch::Tensor dssim_dmu2 = torch::zeros({C, H, W}, mu2.options());
+    torch::Tensor dssim_dsigma1_sq = torch::zeros({C, H, W}, sigma1_sq.options());
+    torch::Tensor dssim_dsigma2_sq = torch::zeros({C, H, W}, sigma2_sq.options());
+    torch::Tensor dssim_dsigma12 = torch::zeros({C, H, W}, sigma12.options());
+    torch::Tensor l1 = torch::zeros({C, H, W}, image.options());
+    torch::Tensor ssim = torch::zeros({C, H, W}, image.options());
+
+    CudaRasterizer::Rasterizer::lossForwardBackward(
+        image.contiguous().data<float>(),
+        gt_image.contiguous().data<float>(),
+        mask.contiguous().data<bool>(),
+        mu1.contiguous().data<float>(),
+        mu2.contiguous().data<float>(),
+        sigma1_sq.contiguous().data<float>(),
+        sigma2_sq.contiguous().data<float>(),
+        sigma12.contiguous().data<float>(),
+        C,
+        H,
+        W,
+        l1.contiguous().data<float>(),
+        ssim.contiguous().data<float>(),
+        dl1_dimage.contiguous().data<float>(),
+        dssim_dmu1.contiguous().data<float>(),
+        dssim_dmu2.contiguous().data<float>(),
+        dssim_dsigma1_sq.contiguous().data<float>(),
+        dssim_dsigma2_sq.contiguous().data<float>(),
+        dssim_dsigma12.contiguous().data<float>(),
+        true
+    );
+
+    return std::make_tuple(l1, ssim, dl1_dimage, dssim_dmu1, dssim_dmu2, dssim_dsigma1_sq, dssim_dsigma2_sq, dssim_dsigma12);
+}
+
 
 /////////////////////////////// Preprocess ///////////////////////////////
 

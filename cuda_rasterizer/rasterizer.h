@@ -123,6 +123,31 @@ namespace CudaRasterizer
 			int64_t num_select,
 			bool debug
 		);
+		
+        ///////////////////////////////// Loss ///////////////////////////////////
+        static void lossForwardBackward(
+            const float *image,
+            const float *gt_image,
+            const bool *mask,
+            const float *mu1,
+            const float *mu2,
+            const float *sigma1_sq,
+            const float *sigma2_sq,
+            const float *sigma12,
+            const int C,
+            const int H,
+            const int W,
+            float *l1,
+            float *ssim,
+            float *dl1_dimage,
+            float *dssim_dmu1,
+            float *dssim_dmu2,
+            float *dssim_dsigma1_sq,
+            float *dssim_dsigma2_sq,
+            float *dssim_dsigma12,
+            bool debug
+        );
+
 		/////////////////////////////// Preprocess ///////////////////////////////
 
 

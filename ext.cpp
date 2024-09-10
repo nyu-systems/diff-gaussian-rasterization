@@ -43,4 +43,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("send2cpu_cat", &Send2CpuCatCUDA);
   m.def("send2cpu_cat_buffer", &Send2CpuCatBufferCUDA);
   m.def("send2cpu_cat_buffer_osr_shs", &Send2CpuCatBufferOSRSHSCUDA);
+  m.def("fused_loss", &FusedLossCUDA);
 }
