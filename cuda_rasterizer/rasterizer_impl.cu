@@ -632,6 +632,18 @@ __global__ void cat_transfer_xyz_cpu2gpu_kernel(
 	}
 }
 
+__global__ void cat_transfer_xyz_cpu2gpu_kernel_v2(
+	float *h_concat,
+	int64_t N,
+	float *d_xyz
+) {
+	int64_t stride = gridDim.x * blockDim.x;
+
+	for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < N; i += stride) {
+		((float3*)d_xyz)[i] = *((float3*)(h_concat+i*59));
+	}
+}
+
 void CudaRasterizer::Rasterizer::cat_transfer_xyz(
     float *d_xyz,
     float *h_concat,
@@ -641,7 +653,8 @@ void CudaRasterizer::Rasterizer::cat_transfer_xyz(
 	int grid_size = 32;
 	int block_size = 256;
 
-	CHECK_CUDA(_launch_wrapper(cat_transfer_xyz_cpu2gpu_kernel, grid_size, block_size,
+	// CHECK_CUDA(_launch_wrapper(cat_transfer_xyz_cpu2gpu_kernel, grid_size, block_size,
+	CHECK_CUDA(_launch_wrapper(cat_transfer_xyz_cpu2gpu_kernel_v2, grid_size, block_size,
 		h_concat,
 		N,
 		d_xyz
@@ -676,6 +689,33 @@ __global__ void cat_transfer_osr_cpu2gpu_kernel(
     }
 }
 
+__global__ void cat_transfer_osr_cpu2gpu_kernel_v2(
+    float *h_srce,
+    int *dims,
+    int *dims_presum_rshift,
+    int *col2attr,
+    int n_all_col,
+	int n_load_col,
+    int64_t *rank2id,
+    int64_t num_select,
+    float **d_dest
+) {
+    int64_t stride = gridDim.x * blockDim.x;
+
+    for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < num_select; i += stride) {
+
+		int64_t row = rank2id[i];
+		float4* data = reinterpret_cast<float4*>(h_srce + row * n_all_col + 3);
+		float4 data_0 = data[0];
+		float4 data_1 = data[1];
+
+		d_dest[0][i] = data_0.x; // opacities
+		((float3*)(d_dest[1]))[i] = make_float3(data_0.y, data_0.z, data_0.w); // scaling
+		((float4*)(d_dest[2]))[i] = data_1; // rotation		
+    }
+}
+
+
 void CudaRasterizer::Rasterizer::cat_transfer_osr(
     float **d_scattr,
     float *h_concat,
@@ -693,7 +733,8 @@ void CudaRasterizer::Rasterizer::cat_transfer_osr(
 	int grid_size = 32;
 	int block_size = 256;
 
-	CHECK_CUDA(_launch_wrapper(cat_transfer_osr_cpu2gpu_kernel, grid_size, block_size,
+	// CHECK_CUDA(_launch_wrapper(cat_transfer_osr_cpu2gpu_kernel, grid_size, block_size,
+	CHECK_CUDA(_launch_wrapper(cat_transfer_osr_cpu2gpu_kernel_v2, grid_size, block_size,
 		h_concat,
 		dims,
 		dims_presum_rshift,
