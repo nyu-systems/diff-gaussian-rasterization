@@ -653,8 +653,8 @@ void CudaRasterizer::Rasterizer::cat_transfer_xyz(
 	int grid_size = 32;
 	int block_size = 256;
 
-	// CHECK_CUDA(_launch_wrapper(cat_transfer_xyz_cpu2gpu_kernel, grid_size, block_size,
-	CHECK_CUDA(_launch_wrapper(cat_transfer_xyz_cpu2gpu_kernel_v2, grid_size, block_size,
+	CHECK_CUDA(_launch_wrapper(cat_transfer_xyz_cpu2gpu_kernel, grid_size, block_size,
+	// CHECK_CUDA(_launch_wrapper(cat_transfer_xyz_cpu2gpu_kernel_v2, grid_size, block_size,
 		h_concat,
 		N,
 		d_xyz
@@ -705,13 +705,23 @@ __global__ void cat_transfer_osr_cpu2gpu_kernel_v2(
     for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < num_select; i += stride) {
 
 		int64_t row = rank2id[i];
-		float4* data = reinterpret_cast<float4*>(h_srce + row * n_all_col + 3);
-		float4 data_0 = data[0];
-		float4 data_1 = data[1];
+		float* data = reinterpret_cast<float*>(h_srce + row * n_all_col + 3);
+		float data_0 = data[0];
+		float data_1 = data[1];
+		float data_2 = data[2];
+		float data_3 = data[3];
+		float data_4 = data[4];
+		float data_5 = data[5];
+		float data_6 = data[6];
+		float data_7 = data[7];
 
-		d_dest[0][i] = data_0.x; // opacities
-		((float3*)(d_dest[1]))[i] = make_float3(data_0.y, data_0.z, data_0.w); // scaling
-		((float4*)(d_dest[2]))[i] = data_1; // rotation		
+		d_dest[0][i] = data_0; // opacities
+		((float3*)(d_dest[1]))[i] = make_float3(data_1, data_2, data_3); // scaling
+		float* rot = (float*)(d_dest[2]) + i * 4; // rotation
+		rot[0] = data_4;
+		rot[1] = data_5;
+		rot[2] = data_6;
+		rot[3] = data_7;
     }
 }
 
@@ -733,8 +743,8 @@ void CudaRasterizer::Rasterizer::cat_transfer_osr(
 	int grid_size = 32;
 	int block_size = 256;
 
-	// CHECK_CUDA(_launch_wrapper(cat_transfer_osr_cpu2gpu_kernel, grid_size, block_size,
-	CHECK_CUDA(_launch_wrapper(cat_transfer_osr_cpu2gpu_kernel_v2, grid_size, block_size,
+	CHECK_CUDA(_launch_wrapper(cat_transfer_osr_cpu2gpu_kernel, grid_size, block_size,
+	// CHECK_CUDA(_launch_wrapper(cat_transfer_osr_cpu2gpu_kernel_v2, grid_size, block_size,
 		h_concat,
 		dims,
 		dims_presum_rshift,
