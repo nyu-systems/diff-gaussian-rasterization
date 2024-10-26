@@ -82,7 +82,8 @@ void Send2CpuCatBufferOSRSHSCUDA(
 	torch::Tensor& dims,
     torch::Tensor& dims_presum_shift,
     torch::Tensor& col2attr,
-    torch::Tensor& h_dparameters);
+    torch::Tensor& h_dparameters,
+    bool accum);
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 Send2CpuCUDA_deprecated(

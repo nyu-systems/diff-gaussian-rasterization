@@ -805,7 +805,8 @@ __global__ void cat_transfer_gpu2cpu_osr_shs_kernel(
 	int *dims_presum_rshift,
 	int *col2attr,
 	int64_t num_select,
-	float *h_dest
+	float *h_dest,
+    bool accum
 ) {
 	int64_t stride = gridDim.x * blockDim.x;
 	int64_t total_elements = num_select * 59;
@@ -820,7 +821,8 @@ __global__ void cat_transfer_gpu2cpu_osr_shs_kernel(
 		if (attr < 4) row = infrustum_radii_opacities_filter_indices[row];
 		int64_t offset_srce = row * dims[attr] + col - dims_presum_rshift[attr];
 
-		h_dest[offset_dest] = d_srce[attr][offset_srce];
+        if (accum) h_dest[offset_dest] += d_srce[attr][offset_srce];
+		else h_dest[offset_dest] = d_srce[attr][offset_srce];
 	}
 }
 
@@ -833,6 +835,7 @@ void CudaRasterizer::Rasterizer::cat_transfer_gpu2cpu_osr_shs(
 	int *dims_presum_rshift,
 	int *col2attr,
 	int64_t num_select,
+    bool accum,
 	bool debug
 ) {
 	int grid_size = 32;
@@ -846,7 +849,8 @@ void CudaRasterizer::Rasterizer::cat_transfer_gpu2cpu_osr_shs(
 		dims_presum_rshift,
 		col2attr,
 		num_select,
-		h_dest
+		h_dest,
+        accum
 	), debug)
 }
 

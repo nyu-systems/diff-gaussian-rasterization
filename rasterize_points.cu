@@ -568,7 +568,8 @@ void Send2CpuCatBufferOSRSHSCUDA(
 	torch::Tensor& dims,
     torch::Tensor& dims_presum_shift,
     torch::Tensor& col2attr,
-    torch::Tensor& h_dparameters)
+    torch::Tensor& h_dparameters,
+    bool accum)
 {
 	int64_t N = h_dparameters.size(0);
 	int64_t num_select = send2gpu_final_filter_indices.size(0);
@@ -590,6 +591,7 @@ void Send2CpuCatBufferOSRSHSCUDA(
         dims_presum_shift.contiguous().data<int>(),
         col2attr.contiguous().data<int>(),
         num_select,
+        accum,
         false
     );
 

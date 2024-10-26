@@ -121,6 +121,7 @@ namespace CudaRasterizer
 			int *dims_presum_rshift,
 			int *col2attr,
 			int64_t num_select,
+            bool accum,
 			bool debug
 		);
 		

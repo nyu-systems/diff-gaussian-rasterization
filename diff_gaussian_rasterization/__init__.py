@@ -795,7 +795,8 @@ def send2cpu_cat_buffer_osr_shs(
     dims,
     dims_presum_rshift,
     col2attr,
-    h_dparameters
+    h_dparameters,
+    accum=False
 ):
     assert dmeans3D.is_cuda
     assert dopacities.is_cuda
@@ -820,5 +821,6 @@ def send2cpu_cat_buffer_osr_shs(
         dims,
         dims_presum_rshift,
         col2attr,
-        h_dparameters
+        h_dparameters,
+        accum
     )
