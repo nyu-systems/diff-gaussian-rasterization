@@ -797,6 +797,45 @@ void CudaRasterizer::Rasterizer::cat_transfer_shs(
 	), debug)
 }
 
+__global__ void transfer_shs_kernel(
+    float *h_shs,
+    int64_t *rank2id,
+    int64_t num_select,
+    float *d_shs
+) {
+    int64_t stride = gridDim.x * blockDim.x;
+    int64_t total_elements = num_select * 48;
+
+    for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < total_elements; i += stride) {
+        int64_t row = i / 48;
+        int col = i % 48;
+
+        int64_t offset_srce = rank2id[row] * 48 + col;
+        int64_t offset_dest = i;
+
+        d_shs[offset_dest] = h_shs[offset_srce];
+    }
+}
+
+void CudaRasterizer::Rasterizer::transfer_shs(
+    float *d_shs,
+    float *h_shs,
+    int64_t *d_mask_indices,
+    int64_t N,
+    int64_t num_select,
+    bool debug
+) {
+    int grid_size = 32;
+    int block_size = 256;
+
+    CHECK_CUDA(_launch_wrapper(transfer_shs_kernel, grid_size, block_size,
+        h_shs,
+        d_mask_indices,
+        num_select,
+        d_shs
+    ), debug)
+}
+
 __global__ void cat_transfer_gpu2cpu_osr_shs_kernel(
 	float **d_srce,
 	int64_t *infrustum_radii_opacities_filter_indices,
@@ -852,6 +891,48 @@ void CudaRasterizer::Rasterizer::cat_transfer_gpu2cpu_osr_shs(
 		h_dest,
         accum
 	), debug)
+}
+
+__global__ void transfer_cpu2gpu_shs_kernel(
+    float *d_dshs,
+    int64_t *rank2id,
+    int64_t num_select,
+    float *h_dparameters,
+    bool accum
+) {
+    int64_t stride = gridDim.x * blockDim.x;
+    int64_t total_elements = num_select * 48;
+
+    for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < total_elements; i += stride) {
+        int64_t row = i / 48;
+        int col = i % 48;
+
+        int64_t offset_srce = i;
+        int64_t offset_dest = rank2id[row] * 48 + col;
+
+        if (accum) h_dparameters[offset_dest] += d_dshs[offset_srce];
+        else h_dparameters[offset_dest] = d_dshs[offset_srce];
+    }
+}
+
+void CudaRasterizer::Rasterizer::transfer_cpu2gpu_shs(
+    float *d_dshs,
+    int64_t *mask_indices,
+    int64_t num_select,
+    float *h_dparameters,
+    bool accum,
+    bool debug
+) {
+    int grid_size = 32;
+    int block_size = 256;
+
+    CHECK_CUDA(_launch_wrapper(transfer_cpu2gpu_shs_kernel, grid_size, block_size,
+        d_dshs,
+        mask_indices,
+        num_select,
+        h_dparameters,
+        accum
+    ), debug)
 }
 
 

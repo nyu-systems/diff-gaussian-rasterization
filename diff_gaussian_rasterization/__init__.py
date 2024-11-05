@@ -744,6 +744,17 @@ def send_cat2gpu_shs(
         mask_indices
     )
 
+def send_shs2gpu_shs(
+    parameters,
+    mask_indices,
+):
+    assert parameters.is_pinned()
+    assert mask_indices.is_cuda
+    
+    return _C.send_shs2gpu_shs(
+        parameters,
+        mask_indices
+    )
 
 def send2cpu_cat_buffer(
     dmeans3D,
@@ -821,6 +832,24 @@ def send2cpu_cat_buffer_osr_shs(
         dims,
         dims_presum_rshift,
         col2attr,
+        h_dparameters,
+        accum
+    )
+
+def send_shs2cpu_shs_buffer(
+    d_dshs,
+    mask_indices,
+    h_dparameters,
+    accum=False
+):
+    assert d_dshs.is_cuda
+    assert mask_indices.is_cuda
+    assert h_dparameters.is_pinned()
+    assert d_dshs.shape[0] == mask_indices.shape[0]
+    
+    return _C.send_shs2cpu_shs_buffer(
+        d_dshs,
+        mask_indices,
         h_dparameters,
         accum
     )

@@ -277,6 +277,28 @@ torch::Tensor SendCat2GpuSHSCUDA(
     return d_shs;
 }
 
+torch::Tensor SendSHS2GpuSHSCUDA(
+    torch::Tensor& parameters,
+    torch::Tensor& mask_indices)
+{
+    int64_t N = parameters.size(0);
+    int64_t num_select = mask_indices.size(0);
+
+    auto options = torch::TensorOptions().device(torch::kCUDA);
+    torch::Tensor d_shs = torch::empty({num_select, 48}, options);
+
+    CudaRasterizer::Rasterizer::transfer_shs(
+        d_shs.contiguous().data<float>(),
+        parameters.contiguous().data<float>(),
+        mask_indices.contiguous().data<int64_t>(),
+        N,
+        num_select,
+        false
+    );
+
+    return d_shs;
+}
+
 void SendCat2GpuBufferCUDA(
     torch::Tensor& parameters,
     torch::Tensor& mask,
@@ -597,6 +619,26 @@ void Send2CpuCatBufferOSRSHSCUDA(
 
 	cudaDeviceSynchronize();
 	cudaFree(d_param_ptrs);
+}
+
+void SendSHS2CpuSHSBufferCUDA(
+    torch::Tensor& d_dshs,
+    torch::Tensor& mask_indices,
+    torch::Tensor& h_dparameters,
+    bool accum)
+{
+    int64_t num_select = mask_indices.size(0);
+
+    CudaRasterizer::Rasterizer::transfer_cpu2gpu_shs(
+        d_dshs.contiguous().data<float>(),
+        mask_indices.contiguous().data<int64_t>(),
+        num_select,
+        h_dparameters.contiguous().data<float>(),
+        accum,
+        false
+    );
+
+    cudaDeviceSynchronize();
 }
 
 ////////////////////////////////// Loss //////////////////////////////////

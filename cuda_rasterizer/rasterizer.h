@@ -112,6 +112,15 @@ namespace CudaRasterizer
 			bool debug
 		);
 
+        static void transfer_shs(
+            float *d_shs,
+            float *h_shs,
+            int64_t *d_mask_indices,
+            int64_t N,
+            int64_t num_select,
+            bool debug
+        );
+
 		static void cat_transfer_gpu2cpu_osr_shs(
 			float **d_srce,
 			float *h_dest,
@@ -124,6 +133,15 @@ namespace CudaRasterizer
             bool accum,
 			bool debug
 		);
+
+        static void transfer_cpu2gpu_shs(
+            float *d_dshs,
+            int64_t *mask_indices,
+            int64_t num_select,
+            float *h_dparameters,
+            bool accum,
+            bool debug
+        );
 		
         ///////////////////////////////// Loss ///////////////////////////////////
         static void lossForwardBackward(

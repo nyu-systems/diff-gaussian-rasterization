@@ -59,6 +59,10 @@ torch::Tensor SendCat2GpuSHSCUDA(
     torch::Tensor& parameters,
     torch::Tensor& mask_indices);
 
+torch::Tensor SendSHS2GpuSHSCUDA(
+    torch::Tensor& parameters,
+    torch::Tensor& mask_indices);
+
 void SendCat2GpuBufferCUDA(
     torch::Tensor& parameters,
     torch::Tensor& mask,
@@ -82,6 +86,12 @@ void Send2CpuCatBufferOSRSHSCUDA(
 	torch::Tensor& dims,
     torch::Tensor& dims_presum_shift,
     torch::Tensor& col2attr,
+    torch::Tensor& h_dparameters,
+    bool accum);
+
+void SendSHS2CpuSHSBufferCUDA(
+    torch::Tensor& d_dshs,
+    torch::Tensor& mask_indices,
     torch::Tensor& h_dparameters,
     bool accum);
 
