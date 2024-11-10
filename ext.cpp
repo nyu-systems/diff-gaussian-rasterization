@@ -38,6 +38,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("send_cat2gpu_osr", &SendCat2GpuOSRCUDA);
   m.def("send_cat2gpu_shs", &SendCat2GpuSHSCUDA);
   m.def("send_shs2gpu_shs", &SendSHS2GpuSHSCUDA);
+  m.def("send_shs2gpu_stream", &SendSHS2GpuStreamCUDA);
   m.def("send_cat2gpu_buffer", &SendCat2GpuBufferCUDA);
   m.def("send2cpu_deprecated", &Send2CpuCUDA_deprecated);
   m.def("send2cpu", &Send2CpuCUDA);
@@ -45,5 +46,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("send2cpu_cat_buffer", &Send2CpuCatBufferCUDA);
   m.def("send2cpu_cat_buffer_osr_shs", &Send2CpuCatBufferOSRSHSCUDA);
   m.def("send_shs2cpu_shs_buffer", &SendSHS2CpuSHSBufferCUDA);
+  m.def("send_shs2cpu_grad_buffer_stream", &SendSHS2CpuGradBufferStreamCUDA);
   m.def("fused_loss", &FusedLossCUDA);
 }

@@ -25,6 +25,7 @@
 #include <string>
 #include <functional>
 #include <cassert>
+#include <c10/cuda/CUDAStream.h>
 
 #include <cooperative_groups.h>
 namespace cg = cooperative_groups;
@@ -297,6 +298,46 @@ torch::Tensor SendSHS2GpuSHSCUDA(
     );
 
     return d_shs;
+}
+
+__global__ void transfer_shs_cpu2gpu_kernel_stream(
+    float *d_shs,
+    const float *h_shs,
+    const int64_t *rank2id,
+    int64_t num_select
+) {
+    int64_t stride = gridDim.x * blockDim.x;
+    int64_t total_elements = num_select * 48;
+
+    for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < total_elements; i += stride) {
+        int64_t row = i / 48;
+        int col = i % 48;
+
+        int64_t offset_srce = rank2id[row] * 48 + col;
+        int64_t offset_dest = i;
+
+        d_shs[offset_dest] = h_shs[offset_srce];
+    }
+}
+
+void SendSHS2GpuStreamCUDA(
+    torch::Tensor& d_parameters,
+    torch::Tensor& h_parameters,
+    torch::Tensor& mask_indices)
+{
+    int64_t N = h_parameters.size(0);
+    int64_t num_select = mask_indices.size(0);
+
+    cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
+
+    const int grid_size = 32;
+    const int block_size = 256;
+    transfer_shs_cpu2gpu_kernel_stream<<<grid_size, block_size, 0, stream>>>(
+        d_parameters.contiguous().data<float>(),
+        h_parameters.contiguous().data<float>(),
+        mask_indices.contiguous().data<int64_t>(),
+        num_select
+    );
 }
 
 void SendCat2GpuBufferCUDA(
@@ -640,6 +681,52 @@ void SendSHS2CpuSHSBufferCUDA(
 
     cudaDeviceSynchronize();
 }
+
+__global__ void transfer_shsgrad_gpu2cpu_kernel_stream(
+    const float *d_parameters,
+    float *h_parameters,
+    const int64_t *rank2id,
+    const int64_t num_select,
+    bool accum
+) {
+    int64_t stride = gridDim.x * blockDim.x;
+    int64_t total_elements = num_select * 48;
+
+    for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < total_elements; i += stride) {
+        int64_t row = i / 48;
+        int col = i % 48;
+
+        int64_t offset_srce = i;
+        int64_t offset_dest = rank2id[row] * 48 + col;
+
+        if (accum) h_parameters[offset_dest] += d_parameters[offset_srce];
+        else h_parameters[offset_dest] = d_parameters[offset_srce];
+    }
+}
+
+void SendSHS2CpuGradBufferStreamCUDA(
+    torch::Tensor& d_parameters,
+    torch::Tensor& h_parameters,
+    torch::Tensor& mask_indices,
+    bool accum)
+{
+    int64_t N = h_parameters.size(0);
+    int64_t num_select = mask_indices.size(0);
+
+    cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
+
+    const int grid_size = 32;
+    const int block_size = 256;
+
+    transfer_shsgrad_gpu2cpu_kernel_stream<<<grid_size, block_size, 0, stream>>>(
+        d_parameters.contiguous().data<float>(),
+        h_parameters.contiguous().data<float>(),
+        mask_indices.contiguous().data<int64_t>(),
+        num_select,
+        accum
+    );
+}
+
 
 ////////////////////////////////// Loss //////////////////////////////////
 

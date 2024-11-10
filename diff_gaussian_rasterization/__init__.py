@@ -756,6 +756,23 @@ def send_shs2gpu_shs(
         mask_indices
     )
 
+def send_shs2gpu_stream(
+    d_parameters,
+    h_parameters,
+    mask_indices,
+):
+    assert d_parameters.is_cuda
+    assert h_parameters.is_pinned()
+    assert mask_indices.is_cuda
+    assert d_parameters.shape[0] == mask_indices.shape[0]
+    
+    return _C.send_shs2gpu_stream(
+        d_parameters,
+        h_parameters,
+        mask_indices
+    )
+
+
 def send2cpu_cat_buffer(
     dmeans3D,
     dopacities,
@@ -851,5 +868,23 @@ def send_shs2cpu_shs_buffer(
         d_dshs,
         mask_indices,
         h_dparameters,
+        accum
+    )
+
+def send_shs2cpu_grad_buffer_stream(
+    d_parameters,
+    h_parameters,
+    mask_indices,
+    accum=False
+):
+    assert d_parameters.is_cuda
+    assert h_parameters.is_pinned()
+    assert mask_indices.is_cuda
+    assert d_parameters.shape[0] == mask_indices.shape[0]
+
+    return _C.send_shs2cpu_grad_buffer_stream(
+        d_parameters,
+        h_parameters,
+        mask_indices,
         accum
     )

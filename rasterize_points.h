@@ -63,6 +63,11 @@ torch::Tensor SendSHS2GpuSHSCUDA(
     torch::Tensor& parameters,
     torch::Tensor& mask_indices);
 
+void SendSHS2GpuStreamCUDA(
+    torch::Tensor& d_parameters,
+    torch::Tensor& h_parameters,
+    torch::Tensor& mask_indices);
+
 void SendCat2GpuBufferCUDA(
     torch::Tensor& parameters,
     torch::Tensor& mask,
@@ -93,6 +98,12 @@ void SendSHS2CpuSHSBufferCUDA(
     torch::Tensor& d_dshs,
     torch::Tensor& mask_indices,
     torch::Tensor& h_dparameters,
+    bool accum);
+
+void SendSHS2CpuGradBufferStreamCUDA(
+    torch::Tensor& d_parameters,
+    torch::Tensor& h_parameters,
+    torch::Tensor& mask_indices,
     bool accum);
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
