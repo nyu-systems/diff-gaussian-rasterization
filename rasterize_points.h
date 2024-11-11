@@ -66,7 +66,9 @@ torch::Tensor SendSHS2GpuSHSCUDA(
 void SendSHS2GpuStreamCUDA(
     torch::Tensor& d_parameters,
     torch::Tensor& h_parameters,
-    torch::Tensor& mask_indices);
+    torch::Tensor& mask_indices,
+    int grid_size,
+    int block_size);
 
 void SendCat2GpuBufferCUDA(
     torch::Tensor& parameters,
@@ -104,7 +106,9 @@ void SendSHS2CpuGradBufferStreamCUDA(
     torch::Tensor& d_parameters,
     torch::Tensor& h_parameters,
     torch::Tensor& mask_indices,
-    bool accum);
+    bool accum,
+    int grid_size,
+    int block_size);
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 Send2CpuCUDA_deprecated(

@@ -323,15 +323,19 @@ __global__ void transfer_shs_cpu2gpu_kernel_stream(
 void SendSHS2GpuStreamCUDA(
     torch::Tensor& d_parameters,
     torch::Tensor& h_parameters,
-    torch::Tensor& mask_indices)
+    torch::Tensor& mask_indices,
+    int grid_size,
+    int block_size)
 {
     int64_t N = h_parameters.size(0);
     int64_t num_select = mask_indices.size(0);
 
     cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
 
-    const int grid_size = 32;
-    const int block_size = 256;
+    // const int grid_size = 32;
+    // const int grid_size = 16;
+    // const int grid_size = 8;
+    // const int block_size = 256;
     transfer_shs_cpu2gpu_kernel_stream<<<grid_size, block_size, 0, stream>>>(
         d_parameters.contiguous().data<float>(),
         h_parameters.contiguous().data<float>(),
@@ -708,15 +712,19 @@ void SendSHS2CpuGradBufferStreamCUDA(
     torch::Tensor& d_parameters,
     torch::Tensor& h_parameters,
     torch::Tensor& mask_indices,
-    bool accum)
+    bool accum,
+    int grid_size,
+    int block_size)
 {
     int64_t N = h_parameters.size(0);
     int64_t num_select = mask_indices.size(0);
 
     cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
 
-    const int grid_size = 32;
-    const int block_size = 256;
+    // const int grid_size = 32;
+    // const int grid_size = 16;
+    // const int grid_size = 8;
+    // const int block_size = 256;
 
     transfer_shsgrad_gpu2cpu_kernel_stream<<<grid_size, block_size, 0, stream>>>(
         d_parameters.contiguous().data<float>(),

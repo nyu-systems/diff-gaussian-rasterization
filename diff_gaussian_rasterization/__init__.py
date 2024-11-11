@@ -760,6 +760,8 @@ def send_shs2gpu_stream(
     d_parameters,
     h_parameters,
     mask_indices,
+    grid_size,
+    block_size
 ):
     assert d_parameters.is_cuda
     assert h_parameters.is_pinned()
@@ -769,7 +771,9 @@ def send_shs2gpu_stream(
     return _C.send_shs2gpu_stream(
         d_parameters,
         h_parameters,
-        mask_indices
+        mask_indices,
+        grid_size,
+        block_size
     )
 
 
@@ -875,7 +879,9 @@ def send_shs2cpu_grad_buffer_stream(
     d_parameters,
     h_parameters,
     mask_indices,
-    accum=False
+    accum,
+    grid_size,
+    block_size
 ):
     assert d_parameters.is_cuda
     assert h_parameters.is_pinned()
@@ -886,5 +892,7 @@ def send_shs2cpu_grad_buffer_stream(
         d_parameters,
         h_parameters,
         mask_indices,
-        accum
+        accum,
+        grid_size,
+        block_size
     )
