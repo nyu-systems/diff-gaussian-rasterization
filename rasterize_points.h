@@ -341,3 +341,5 @@ torch::Tensor GetLocal2jIdsBoolAdjustMode6CUDA(
 
 
 std::tuple<int, int, int> GetBlockXY();
+
+void SetSignal(torch::Tensor& signal_tensor, int microbatch_idx, int signal);

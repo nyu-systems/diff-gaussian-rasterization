@@ -1549,3 +1549,24 @@ std::tuple<int, int, int> GetBlockXY()
 {
 	return std::make_tuple(BLOCK_X, BLOCK_Y, ONE_DIM_BLOCK_SIZE);
 }
+
+__global__ void set_signal_kernel(
+    int* signal_tensor,
+    int microbatch_idx,
+    int signal)
+{
+    __threadfence_system();
+    signal_tensor[microbatch_idx] = signal;
+    __threadfence_system();
+}
+
+void SetSignal(torch::Tensor& signal_tensor, int microbatch_idx, int signal)
+{
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+    set_signal_kernel<<<1, 1, 0, stream>>>(
+        reinterpret_cast<int*>(signal_tensor.contiguous().data_ptr()),
+        microbatch_idx,
+        signal
+    );
+
+}
