@@ -70,6 +70,17 @@ void SendSHS2GpuStreamCUDA(
     int grid_size,
     int block_size);
 
+void SendSHS2GpuStreamRetentionCUDA(
+    torch::Tensor& d_parameters,
+    torch::Tensor& h_parameters,
+    torch::Tensor& r_parameters, // on gpu, retent from last iteration
+    torch::Tensor& mask_indicies_from_host,
+    torch::Tensor& mask_indicies_from_retent,
+    torch::Tensor& dest_indicies_from_host,
+    torch::Tensor& dest_indicies_from_retent,
+    int grid_size,
+    int block_size);
+
 void SendCat2GpuBufferCUDA(
     torch::Tensor& parameters,
     torch::Tensor& mask,

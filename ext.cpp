@@ -39,6 +39,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("send_cat2gpu_shs", &SendCat2GpuSHSCUDA);
   m.def("send_shs2gpu_shs", &SendSHS2GpuSHSCUDA);
   m.def("send_shs2gpu_stream", &SendSHS2GpuStreamCUDA);
+  m.def("send_shs2gpu_stream_retention", &SendSHS2GpuStreamRetentionCUDA);
   m.def("send_cat2gpu_buffer", &SendCat2GpuBufferCUDA);
   m.def("send2cpu_deprecated", &Send2CpuCUDA_deprecated);
   m.def("send2cpu", &Send2CpuCUDA);

@@ -776,6 +776,40 @@ def send_shs2gpu_stream(
         block_size
     )
 
+def send_shs2gpu_stream_retention(
+    d_parameters,
+    h_parameters,
+    r_parameters,
+    mask_indicies_from_host,
+    mask_indicies_from_retent,
+    dest_indicies_from_host,
+    dest_indicies_from_retent,
+    grid_size,
+    block_size
+):
+    assert d_parameters.is_cuda
+    assert h_parameters.is_pinned()
+    assert r_parameters.is_cuda
+    assert mask_indicies_from_host.is_cuda
+    assert mask_indicies_from_retent.is_cuda
+    assert dest_indicies_from_host.is_cuda
+    assert dest_indicies_from_retent.is_cuda
+    assert d_parameters.shape[0] == mask_indicies_from_host.shape[0] + mask_indicies_from_retent.shape[0]
+    assert mask_indicies_from_host.shape[0] == dest_indicies_from_host.shape[0]
+    assert mask_indicies_from_retent.shape[0] == dest_indicies_from_retent.shape[0]
+
+    return _C.send_shs2gpu_stream_retention(
+        d_parameters,
+        h_parameters,
+        r_parameters,
+        mask_indicies_from_host,
+        mask_indicies_from_retent,
+        dest_indicies_from_host,
+        dest_indicies_from_retent,
+        grid_size,
+        block_size
+    )
+
 
 def send2cpu_cat_buffer(
     dmeans3D,
