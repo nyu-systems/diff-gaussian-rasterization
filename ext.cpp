@@ -48,6 +48,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("send2cpu_cat_buffer_osr_shs", &Send2CpuCatBufferOSRSHSCUDA);
   m.def("send_shs2cpu_shs_buffer", &SendSHS2CpuSHSBufferCUDA);
   m.def("send_shs2cpu_grad_buffer_stream", &SendSHS2CpuGradBufferStreamCUDA);
+  m.def("send_shs2cpu_grad_buffer_stream_retention", &SendSHS2CpuGradBufferStreamRetentionCUDA);
   m.def("fused_loss", &FusedLossCUDA);
 
   m.def("set_signal", &SetSignal);

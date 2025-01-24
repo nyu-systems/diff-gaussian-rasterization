@@ -780,32 +780,32 @@ def send_shs2gpu_stream_retention(
     d_parameters,
     h_parameters,
     r_parameters,
-    mask_indicies_from_host,
-    mask_indicies_from_retent,
-    dest_indicies_from_host,
-    dest_indicies_from_retent,
+    host_indices,
+    rtnt_indices,
+    param_indices_from_host,
+    param_indices_from_rtnt,
     grid_size,
     block_size
 ):
     assert d_parameters.is_cuda
     assert h_parameters.is_pinned()
     assert r_parameters.is_cuda
-    assert mask_indicies_from_host.is_cuda
-    assert mask_indicies_from_retent.is_cuda
-    assert dest_indicies_from_host.is_cuda
-    assert dest_indicies_from_retent.is_cuda
-    assert d_parameters.shape[0] == mask_indicies_from_host.shape[0] + mask_indicies_from_retent.shape[0]
-    assert mask_indicies_from_host.shape[0] == dest_indicies_from_host.shape[0]
-    assert mask_indicies_from_retent.shape[0] == dest_indicies_from_retent.shape[0]
+    assert host_indices.is_cuda
+    assert rtnt_indices.is_cuda
+    assert param_indices_from_host.is_cuda
+    assert param_indices_from_rtnt.is_cuda
+    assert d_parameters.shape[0] == host_indices.shape[0] + rtnt_indices.shape[0]
+    assert host_indices.shape[0] == param_indices_from_host.shape[0]
+    assert rtnt_indices.shape[0] == param_indices_from_rtnt.shape[0]
 
     return _C.send_shs2gpu_stream_retention(
         d_parameters,
         h_parameters,
         r_parameters,
-        mask_indicies_from_host,
-        mask_indicies_from_retent,
-        dest_indicies_from_host,
-        dest_indicies_from_retent,
+        host_indices,
+        rtnt_indices,
+        param_indices_from_host,
+        param_indices_from_rtnt,
         grid_size,
         block_size
     )
@@ -929,4 +929,40 @@ def send_shs2cpu_grad_buffer_stream(
         accum,
         grid_size,
         block_size
+    )
+
+def send_shs2cpu_grad_buffer_stream_retention(
+    d_parameters,
+    h_parameters,
+    r_parameters,
+    host_indices,
+    rtnt_indices,
+    grad_indices_to_host,
+    grad_indices_to_rtnt,
+    accum,
+    grid_size,
+    block_size,
+):
+    assert d_parameters.is_cuda
+    assert h_parameters.is_pinned()
+    assert r_parameters.is_cuda
+    assert host_indices.is_cuda
+    assert rtnt_indices.is_cuda
+    assert grad_indices_to_host.is_cuda
+    assert grad_indices_to_rtnt.is_cuda
+    assert d_parameters.shape[0] == host_indices.shape[0] + rtnt_indices.shape[0]
+    assert host_indices.shape[0] == grad_indices_to_host.shape[0]
+    assert rtnt_indices.shape[0] == grad_indices_to_rtnt.shape[0]
+
+    return _C.send_shs2cpu_grad_buffer_stream_retention(
+        d_parameters,
+        h_parameters,
+        r_parameters,
+        host_indices,
+        rtnt_indices,
+        grad_indices_to_host,
+        grad_indices_to_rtnt,
+        accum,
+        grid_size,
+        block_size,
     )
