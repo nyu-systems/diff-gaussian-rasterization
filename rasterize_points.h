@@ -78,8 +78,10 @@ void SendSHS2GpuStreamRetentionCUDA(
     torch::Tensor& rtnt_indices,
     torch::Tensor& param_indices_from_host,
     torch::Tensor& param_indices_from_rtnt,
-    int grid_size,
-    int block_size);
+    int grid_size_H,
+    int block_size_H,
+    int grid_size_D,
+    int block_size_D);
 
 void SendCat2GpuBufferCUDA(
     torch::Tensor& parameters,
@@ -130,8 +132,10 @@ void SendSHS2CpuGradBufferStreamRetentionCUDA(
     torch::Tensor& grad_indices_to_host,
     torch::Tensor& grad_indices_to_rtnt,
     bool accum,
-    int grid_size,
-    int block_size);
+    int grid_size_H,
+    int block_size_H,
+    int grid_size_D,
+    int block_size_D);
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 Send2CpuCUDA_deprecated(

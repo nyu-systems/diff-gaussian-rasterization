@@ -394,8 +394,10 @@ void SendSHS2GpuStreamRetentionCUDA(
     torch::Tensor& rtnt_indices,
     torch::Tensor& param_indices_from_host,
     torch::Tensor& param_indices_from_rtnt,
-    int grid_size,
-    int block_size)
+    int grid_size_H,
+    int block_size_H,
+    int grid_size_D,
+    int block_size_D)
 {
     int64_t N = h_parameters.size(0); // number of all gaussians
     int64_t num_select_from_host = host_indices.size(0);
@@ -403,7 +405,7 @@ void SendSHS2GpuStreamRetentionCUDA(
 
     cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
 
-    transfer_H_shs_cpu2gpu_kernel_stream<<<grid_size, block_size, 0, stream>>>(
+    transfer_H_shs_cpu2gpu_kernel_stream<<<grid_size_H, block_size_H, 0, stream>>>(
         d_parameters.contiguous().data<float>(),
         h_parameters.contiguous().data<float>(),
         host_indices.contiguous().data<int64_t>(),
@@ -411,7 +413,7 @@ void SendSHS2GpuStreamRetentionCUDA(
         num_select_from_host
     );
 
-    transfer_D_shs_cpu2gpu_kernel_stream<<<grid_size, block_size, 0, stream>>>(
+    transfer_D_shs_cpu2gpu_kernel_stream<<<grid_size_D, block_size_D, 0, stream>>>(
         d_parameters.contiguous().data<float>(),
         r_parameters.contiguous().data<float>(),
         rtnt_indices.contiguous().data<int64_t>(),
@@ -868,8 +870,10 @@ void SendSHS2CpuGradBufferStreamRetentionCUDA(
     torch::Tensor& grad_indices_to_host,
     torch::Tensor& grad_indices_to_rtnt,
     bool accum,
-    int grid_size,
-    int block_size
+    int grid_size_H,
+    int block_size_H,
+    int grid_size_D,
+    int block_size_D
 )
 {
     int64_t N = h_parameters.size(0); // number of all gaussians
@@ -878,7 +882,7 @@ void SendSHS2CpuGradBufferStreamRetentionCUDA(
 
     cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
 
-    transfer_H_shsgrad_gpu2cpu_kernel_stream<<<grid_size, block_size, 0, stream>>>(
+    transfer_H_shsgrad_gpu2cpu_kernel_stream<<<grid_size_H, block_size_H, 0, stream>>>(
         d_parameters.contiguous().data<float>(),
         h_parameters.contiguous().data<float>(),
         host_indices.contiguous().data<int64_t>(),
@@ -887,7 +891,7 @@ void SendSHS2CpuGradBufferStreamRetentionCUDA(
         accum
     );
 
-    transfer_D_shsgrad_gpu2cpu_kernel_stream<<<grid_size, block_size, 0, stream>>>(
+    transfer_D_shsgrad_gpu2cpu_kernel_stream<<<grid_size_D, block_size_D, 0, stream>>>(
         d_parameters.contiguous().data<float>(),
         r_parameters.contiguous().data<float>(),
         rtnt_indices.contiguous().data<int64_t>(),

@@ -784,8 +784,10 @@ def send_shs2gpu_stream_retention(
     rtnt_indices,
     param_indices_from_host,
     param_indices_from_rtnt,
-    grid_size,
-    block_size
+    grid_size_H,
+    block_size_H,
+    grid_size_D,
+    block_size_D
 ):
     assert d_parameters.is_cuda
     assert h_parameters.is_pinned()
@@ -806,8 +808,10 @@ def send_shs2gpu_stream_retention(
         rtnt_indices,
         param_indices_from_host,
         param_indices_from_rtnt,
-        grid_size,
-        block_size
+        grid_size_H,
+        block_size_H,
+        grid_size_D,
+        block_size_D
     )
 
 
@@ -940,8 +944,10 @@ def send_shs2cpu_grad_buffer_stream_retention(
     grad_indices_to_host,
     grad_indices_to_rtnt,
     accum,
-    grid_size,
-    block_size,
+    grid_size_H,
+    block_size_H,
+    grid_size_D,
+    block_size_D
 ):
     assert d_parameters.is_cuda
     assert h_parameters.is_pinned()
@@ -963,6 +969,8 @@ def send_shs2cpu_grad_buffer_stream_retention(
         grad_indices_to_host,
         grad_indices_to_rtnt,
         accum,
-        grid_size,
-        block_size,
+        grid_size_H,
+        block_size_H,
+        grid_size_D,
+        block_size_D
     )
