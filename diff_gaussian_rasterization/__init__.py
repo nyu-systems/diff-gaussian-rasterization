@@ -814,6 +814,37 @@ def send_shs2gpu_stream_retention(
         block_size_D
     )
 
+def send_shs2gpu_stream_retention2(
+    d_parameters,
+    h_parameters,
+    r_parameters,
+    filter_next,
+    retention_vec,
+    grid_size_H,
+    block_size_H,
+    grid_size_D,
+    block_size_D
+):
+    assert d_parameters.is_cuda
+    assert h_parameters.is_pinned()
+    assert r_parameters.is_cuda
+    assert filter_next.is_cuda
+    assert retention_vec.is_cuda
+    assert d_parameters.shape[0] == filter_next.shape[0]
+    assert h_parameters.shape[0] == retention_vec.shape[0]
+
+    return _C.send_shs2gpu_stream_retention2(
+        d_parameters,
+        h_parameters,
+        r_parameters,
+        filter_next,
+        retention_vec,
+        grid_size_H,
+        block_size_H,
+        grid_size_D,
+        block_size_D
+    )
+
 
 def send2cpu_cat_buffer(
     dmeans3D,
@@ -968,6 +999,43 @@ def send_shs2cpu_grad_buffer_stream_retention(
         rtnt_indices,
         grad_indices_to_host,
         grad_indices_to_rtnt,
+        accum,
+        grid_size_H,
+        block_size_H,
+        grid_size_D,
+        block_size_D
+    )
+
+def send_shs2cpu_grad_buffer_stream_retention2(
+    d_parameters,
+    h_parameters,
+    r_parameters,
+    filter_this,
+    filter_next,
+    retention_vec,
+    accum,
+    grid_size_H,
+    block_size_H,
+    grid_size_D,
+    block_size_D
+):
+    assert d_parameters.is_cuda
+    assert h_parameters.is_pinned()
+    assert r_parameters.is_cuda
+    assert filter_this.is_cuda
+    assert filter_next.is_cuda
+    assert retention_vec.is_cuda
+    assert d_parameters.shape[0] == filter_this.shape[0]
+    assert h_parameters.shape[0] == retention_vec.shape[0]
+    assert r_parameters.shape[0] == filter_next.shape[0]
+
+    return _C.send_shs2cpu_grad_buffer_stream_retention2(
+        d_parameters,
+        h_parameters,
+        r_parameters,
+        filter_this,
+        filter_next,
+        retention_vec,
         accum,
         grid_size_H,
         block_size_H,

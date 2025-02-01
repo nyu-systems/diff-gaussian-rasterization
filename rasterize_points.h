@@ -83,6 +83,17 @@ void SendSHS2GpuStreamRetentionCUDA(
     int grid_size_D,
     int block_size_D);
 
+void SendSHS2GpuStreamRetention2CUDA(
+    torch::Tensor& d_parameters,
+    torch::Tensor& h_parameters,
+    torch::Tensor& r_parameters,
+    torch::Tensor& filter,
+    torch::Tensor& retention_vec,
+    int grid_size_H,
+    int block_size_H,
+    int grid_size_D,
+    int block_size_D);
+
 void SendCat2GpuBufferCUDA(
     torch::Tensor& parameters,
     torch::Tensor& mask,
@@ -131,6 +142,19 @@ void SendSHS2CpuGradBufferStreamRetentionCUDA(
     torch::Tensor& rtnt_indices,
     torch::Tensor& grad_indices_to_host,
     torch::Tensor& grad_indices_to_rtnt,
+    bool accum,
+    int grid_size_H,
+    int block_size_H,
+    int grid_size_D,
+    int block_size_D);
+
+void SendSHS2CpuGradBufferStreamRetention2CUDA(
+    torch::Tensor& d_parameters,
+    torch::Tensor& h_parameters,
+    torch::Tensor& r_parameters,
+    torch::Tensor& filter,
+    torch::Tensor& filter_r,
+    torch::Tensor& retention_vec,
     bool accum,
     int grid_size_H,
     int block_size_H,
