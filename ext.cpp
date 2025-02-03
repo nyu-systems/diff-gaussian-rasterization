@@ -41,6 +41,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("send_shs2gpu_stream", &SendSHS2GpuStreamCUDA);
   m.def("send_shs2gpu_stream_retention", &SendSHS2GpuStreamRetentionCUDA);
   m.def("send_shs2gpu_stream_retention2", &SendSHS2GpuStreamRetention2CUDA);
+  m.def("send_shs2gpu_stream_retention2_64", &SendSHS2GpuStreamRetention2_64CUDA);
   m.def("send_cat2gpu_buffer", &SendCat2GpuBufferCUDA);
   m.def("send2cpu_deprecated", &Send2CpuCUDA_deprecated);
   m.def("send2cpu", &Send2CpuCUDA);
@@ -50,7 +51,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("send_shs2cpu_shs_buffer", &SendSHS2CpuSHSBufferCUDA);
   m.def("send_shs2cpu_grad_buffer_stream", &SendSHS2CpuGradBufferStreamCUDA);
   m.def("send_shs2cpu_grad_buffer_stream_retention", &SendSHS2CpuGradBufferStreamRetentionCUDA);
-  m.def("send_shs2cpu_grad_buffer_stream_retention2", &SendSHS2CpuGradBufferStreamRetention2CUDA);
+  m.def("send_shs2cpu_grad_buffer_stream_retention2_64", &SendSHS2CpuGradBufferStreamRetention2_64CUDA);
   m.def("fused_loss", &FusedLossCUDA);
 
   m.def("set_signal", &SetSignal);

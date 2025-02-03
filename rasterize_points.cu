@@ -347,6 +347,84 @@ void SendSHS2GpuStreamCUDA(
 __global__ void transfer_H_shs_cpu2gpu_kernel_stream(
     float *d_shs,
     const float *h_shs,
+    const int *host_indices,
+    const int *param_indices_from_host,
+    int num_select_from_host
+) {
+    int stride = gridDim.x * blockDim.x;
+    int total_elements = num_select_from_host * 48;
+
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < total_elements; i += stride) {
+        int row = i / 48;
+        int col = i % 48;
+
+        int offset_srce = host_indices[row] * 48 + col;
+        int offset_dest = param_indices_from_host[row] * 48 + col;
+
+        d_shs[offset_dest] = h_shs[offset_srce];
+    }
+}
+
+__global__ void transfer_D_shs_cpu2gpu_kernel_stream(
+    float *d_shs,
+    const float *r_shs,
+    const int *host_indices,
+    const int *param_indices_from_rtnt,
+    int num_select_from_host
+) {
+    int stride = gridDim.x * blockDim.x;
+    int total_elements = num_select_from_host * 48;
+
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < total_elements; i += stride) {
+        int row = i / 48;
+        int col = i % 48;
+
+        int offset_srce = host_indices[row] * 48 + col;
+        int offset_dest = param_indices_from_rtnt[row] * 48 + col;
+
+        d_shs[offset_dest] = r_shs[offset_srce];
+    }
+}
+
+void SendSHS2GpuStreamRetentionCUDA(
+    torch::Tensor& d_parameters,
+    torch::Tensor& h_parameters,
+    torch::Tensor& r_parameters, // on gpu, retent from last iteration
+    torch::Tensor& host_indices,
+    torch::Tensor& rtnt_indices,
+    torch::Tensor& param_indices_from_host,
+    torch::Tensor& param_indices_from_rtnt,
+    int grid_size_H,
+    int block_size_H,
+    int grid_size_D,
+    int block_size_D)
+{
+    int N = h_parameters.size(0); // number of all gaussians
+    int num_select_from_host = host_indices.size(0);
+    int num_select_from_retent = rtnt_indices.size(0);
+
+    cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
+
+    transfer_H_shs_cpu2gpu_kernel_stream<<<grid_size_H, block_size_H, 0, stream>>>(
+        d_parameters.contiguous().data<float>(),
+        h_parameters.contiguous().data<float>(),
+        host_indices.contiguous().data<int>(),
+        param_indices_from_host.contiguous().data<int>(),
+        num_select_from_host
+    );
+
+    transfer_D_shs_cpu2gpu_kernel_stream<<<grid_size_D, block_size_D, 0, stream>>>(
+        d_parameters.contiguous().data<float>(),
+        r_parameters.contiguous().data<float>(),
+        rtnt_indices.contiguous().data<int>(),
+        param_indices_from_rtnt.contiguous().data<int>(),
+        num_select_from_retent
+    );
+}
+
+__global__ void transfer_H_shs_cpu2gpu_kernel_stream_64(
+    float *d_shs,
+    const float *h_shs,
     const int64_t *host_indices,
     const int64_t *param_indices_from_host,
     int64_t num_select_from_host
@@ -365,7 +443,7 @@ __global__ void transfer_H_shs_cpu2gpu_kernel_stream(
     }
 }
 
-__global__ void transfer_D_shs_cpu2gpu_kernel_stream(
+__global__ void transfer_D_shs_cpu2gpu_kernel_stream_64(
     float *d_shs,
     const float *r_shs,
     const int64_t *host_indices,
@@ -386,7 +464,7 @@ __global__ void transfer_D_shs_cpu2gpu_kernel_stream(
     }
 }
 
-void SendSHS2GpuStreamRetentionCUDA(
+void SendSHS2GpuStreamRetention_64CUDA(
     torch::Tensor& d_parameters,
     torch::Tensor& h_parameters,
     torch::Tensor& r_parameters, // on gpu, retent from last iteration
@@ -405,7 +483,7 @@ void SendSHS2GpuStreamRetentionCUDA(
 
     cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
 
-    transfer_H_shs_cpu2gpu_kernel_stream<<<grid_size_H, block_size_H, 0, stream>>>(
+    transfer_H_shs_cpu2gpu_kernel_stream_64<<<grid_size_H, block_size_H, 0, stream>>>(
         d_parameters.contiguous().data<float>(),
         h_parameters.contiguous().data<float>(),
         host_indices.contiguous().data<int64_t>(),
@@ -413,7 +491,7 @@ void SendSHS2GpuStreamRetentionCUDA(
         num_select_from_host
     );
 
-    transfer_D_shs_cpu2gpu_kernel_stream<<<grid_size_D, block_size_D, 0, stream>>>(
+    transfer_D_shs_cpu2gpu_kernel_stream_64<<<grid_size_D, block_size_D, 0, stream>>>(
         d_parameters.contiguous().data<float>(),
         r_parameters.contiguous().data<float>(),
         rtnt_indices.contiguous().data<int64_t>(),
@@ -458,9 +536,10 @@ __global__ void transfer_D_shs_cpu2gpu_kernel_stream_retention2(
     for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < total_elements; i += stride) {
         int row = filter[i / 48];
         int col = i % 48;
+        int row_r = retention_vec[row];
 
-        if (retention_vec[row] != -1) {
-            int offset_srce = retention_vec[row] * 48 + col;
+        if (row_r != -1) {
+            int offset_srce = row_r * 48 + col;
             int offset_dest = i;
 
             d_shs[offset_dest] = r_shs[offset_srce];
@@ -503,6 +582,86 @@ void SendSHS2GpuStreamRetention2CUDA(
     );
 
 
+}
+
+__global__ void transfer_H_shs_cpu2gpu_kernel_stream_retention2_64(
+    float *d_shs,
+    const float *h_shs,
+    const int64_t *filter,
+    const int64_t *retention_vec,
+    int64_t num_select
+) {
+    int64_t stride = gridDim.x * blockDim.x;
+    int64_t total_elements = num_select * 48;
+
+    for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < total_elements; i += stride) {
+        int64_t row = filter[i / 48];
+        int col = i % 48;
+
+        if (retention_vec[row] == -1) {
+            int64_t offset_srce = row * 48 + col;
+            int64_t offset_dest = i;
+
+            d_shs[offset_dest] = h_shs[offset_srce];
+        }
+    }
+}
+
+__global__ void transfer_D_shs_cpu2gpu_kernel_stream_retention2_64(
+    float *d_shs,
+    const float *r_shs,
+    const int64_t *filter,
+    const int64_t *retention_vec,
+    int64_t num_select
+) {
+    int64_t stride = gridDim.x * blockDim.x;
+    int64_t total_elements = num_select * 48;
+
+    for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < total_elements; i += stride) {
+        int64_t row = filter[i / 48];
+        int col = i % 48;
+        int64_t row_r = retention_vec[row];
+
+        if (row_r != -1) {
+            int64_t offset_srce = row_r * 48 + col;
+            int64_t offset_dest = i;
+
+            d_shs[offset_dest] = r_shs[offset_srce];
+        }
+    }
+}
+
+void SendSHS2GpuStreamRetention2_64CUDA(
+    torch::Tensor& d_parameters, // shs to fill on device
+    torch::Tensor& h_parameters, // shs on host
+    torch::Tensor& r_parameters, // on gpu, retent from last iteration
+    torch::Tensor& filter, // index filter for this iteration, (d_parameters.shape[0],)
+    torch::Tensor& retention_vec, // (n_gaussians,)
+    int grid_size_H,
+    int block_size_H,
+    int grid_size_D,
+    int block_size_D)
+{
+    int64_t N = h_parameters.size(0); // number of all gaussians
+    int64_t num_select = filter.size(0); // number of visible gaussians this iter
+
+    cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
+
+    transfer_D_shs_cpu2gpu_kernel_stream_retention2_64<<<grid_size_D, block_size_D, 0, stream>>>(
+        d_parameters.contiguous().data<float>(),
+        r_parameters.contiguous().data<float>(),
+        filter.contiguous().data<int64_t>(),
+        retention_vec.contiguous().data<int64_t>(),
+        num_select
+    );
+
+    transfer_H_shs_cpu2gpu_kernel_stream_retention2_64<<<grid_size_H, block_size_H, 0, stream>>>(
+        d_parameters.contiguous().data<float>(),
+        h_parameters.contiguous().data<float>(),
+        filter.contiguous().data<int64_t>(),
+        retention_vec.contiguous().data<int64_t>(),
+        num_select
+    );
 }
 
 void SendCat2GpuBufferCUDA(
@@ -899,21 +1058,21 @@ void SendSHS2CpuGradBufferStreamCUDA(
 __global__ void transfer_H_shsgrad_gpu2cpu_kernel_stream(
     const float *d_shs,
     float *h_shs,
-    const int64_t *host_indices,
-    const int64_t *grad_indices,
-    int64_t num_select_from_host,
+    const int *host_indices,
+    const int *grad_indices,
+    int num_select_from_host,
     bool accum
 )
 {
-    int64_t stride = gridDim.x * blockDim.x;
-    int64_t total_elements = num_select_from_host * 48;
+    int stride = gridDim.x * blockDim.x;
+    int total_elements = num_select_from_host * 48;
 
-    for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < total_elements; i += stride) {
-        int64_t row = i / 48;
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < total_elements; i += stride) {
+        int row = i / 48;
         int col = i % 48;
 
-        int64_t offset_host = host_indices[row] * 48 + col;
-        int64_t offset_grad = grad_indices[row] * 48 + col;
+        int offset_host = host_indices[row] * 48 + col;
+        int offset_grad = grad_indices[row] * 48 + col;
 
         if (accum) h_shs[offset_host] += d_shs[offset_grad];
         else h_shs[offset_host] = d_shs[offset_grad];
@@ -923,21 +1082,21 @@ __global__ void transfer_H_shsgrad_gpu2cpu_kernel_stream(
 __global__ void transfer_D_shsgrad_gpu2cpu_kernel_stream(
     const float *d_shs,
     float *r_shs,
-    const int64_t *rtnt_indices,
-    const int64_t *grad_indices,
-    int64_t num_select_from_retent,
+    const int *rtnt_indices,
+    const int *grad_indices,
+    int num_select_from_retent,
     bool accum
 )
 {
-    int64_t stride = gridDim.x * blockDim.x;
-    int64_t total_elements = num_select_from_retent * 48;
+    int stride = gridDim.x * blockDim.x;
+    int total_elements = num_select_from_retent * 48;
 
-    for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < total_elements; i += stride) {
-        int64_t row = i / 48;
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < total_elements; i += stride) {
+        int row = i / 48;
         int col = i % 48;
 
-        int64_t offset_rtnt = rtnt_indices[row] * 48 + col;
-        int64_t offset_grad = grad_indices[row] * 48 + col;
+        int offset_rtnt = rtnt_indices[row] * 48 + col;
+        int offset_grad = grad_indices[row] * 48 + col;
 
         if (accum) r_shs[offset_rtnt] += d_shs[offset_grad];
         else r_shs[offset_rtnt] = d_shs[offset_grad];
@@ -959,17 +1118,17 @@ void SendSHS2CpuGradBufferStreamRetentionCUDA(
     int block_size_D
 )
 {
-    int64_t N = h_parameters.size(0); // number of all gaussians
-    int64_t num_select_from_host = host_indices.size(0);
-    int64_t num_select_from_retent = rtnt_indices.size(0);
+    int N = h_parameters.size(0); // number of all gaussians
+    int num_select_from_host = host_indices.size(0);
+    int num_select_from_retent = rtnt_indices.size(0);
 
     cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
 
     transfer_H_shsgrad_gpu2cpu_kernel_stream<<<grid_size_H, block_size_H, 0, stream>>>(
         d_parameters.contiguous().data<float>(),
         h_parameters.contiguous().data<float>(),
-        host_indices.contiguous().data<int64_t>(),
-        grad_indices_to_host.contiguous().data<int64_t>(),
+        host_indices.contiguous().data<int>(),
+        grad_indices_to_host.contiguous().data<int>(),
         num_select_from_host,
         accum
     );
@@ -977,19 +1136,19 @@ void SendSHS2CpuGradBufferStreamRetentionCUDA(
     transfer_D_shsgrad_gpu2cpu_kernel_stream<<<grid_size_D, block_size_D, 0, stream>>>(
         d_parameters.contiguous().data<float>(),
         r_parameters.contiguous().data<float>(),
-        rtnt_indices.contiguous().data<int64_t>(),
-        grad_indices_to_rtnt.contiguous().data<int64_t>(),
+        rtnt_indices.contiguous().data<int>(),
+        grad_indices_to_rtnt.contiguous().data<int>(),
         num_select_from_retent,
         accum
     );
 }
 
-__global__ void transfer_H_shsgrad_gpu2cpu_kernel_stream_retention2(
+__global__ void transfer_H_shsgrad_gpu2cpu_kernel_stream_retention2_64(
     const float *d_shs,
     float *h_shs,
-    const int *filter,
-    int *retention_vec,
-    int num_select,
+    const int64_t *filter,
+    int64_t *retention_vec,
+    int64_t num_select,
     bool accum
 ) {
     int stride = gridDim.x * blockDim.x;
@@ -1009,24 +1168,24 @@ __global__ void transfer_H_shsgrad_gpu2cpu_kernel_stream_retention2(
     }
 }
 
-__global__ void transfer_D_shsgrad_gpu2cpu_kernel_stream_retention2(
+__global__ void transfer_D_shsgrad_gpu2cpu_kernel_stream_retention2_64(
     const float *d_shs,
     float *r_shs,
-    const int *filter,
-    int *retention_vec,
-    int num_select,
+    const int64_t *filter,
+    int64_t *retention_vec,
+    int64_t num_select,
     bool accum
 ) {
-    int stride = gridDim.x * blockDim.x;
-    int total_elements = num_select * 48;
+    int64_t stride = gridDim.x * blockDim.x;
+    int64_t total_elements = num_select * 48;
 
-    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < total_elements; i += stride) {
-        int row = filter[i / 48];
+    for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < total_elements; i += stride) {
+        int64_t row = filter[i / 48];
         int col = i % 48;
 
         if (retention_vec[row] != -1) {
-            int offset_srce = retention_vec[row] * 48 + col;
-            int offset_dest = i;
+            int64_t offset_srce = retention_vec[row] * 48 + col;
+            int64_t offset_dest = i;
 
             if (accum) r_shs[offset_dest] += d_shs[offset_srce];
             else r_shs[offset_dest] = d_shs[offset_srce];
@@ -1037,19 +1196,19 @@ __global__ void transfer_D_shsgrad_gpu2cpu_kernel_stream_retention2(
 }
 
 __global__ void mark_retention_vec(
-    const int *filter,
-    int *retention_vec,
-    int num_select
+    const int64_t *filter,
+    int64_t *retention_vec,
+    int64_t num_select
 ) {
-    int stride = gridDim.x * blockDim.x;
+    int64_t stride = gridDim.x * blockDim.x;
     
-    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < num_select; i += stride) {
-        int row = filter[i];
+    for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < num_select; i += stride) {
+        int64_t row = filter[i];
         if (retention_vec[row] != -1) retention_vec[row] = -2;
     }
 }
 
-void SendSHS2CpuGradBufferStreamRetention2CUDA(
+void SendSHS2CpuGradBufferStreamRetention2_64CUDA(
     torch::Tensor& d_parameters, // input
     torch::Tensor& h_parameters, // output 1
     torch::Tensor& r_parameters, // output 2, on gpu, gradients retent for next iteration
@@ -1063,32 +1222,32 @@ void SendSHS2CpuGradBufferStreamRetention2CUDA(
     int block_size_D
 )
 {
-    int N = h_parameters.size(0); // number of all gaussians
-    int num_select = filter.size(0); // number of visible gaussians this iter
-    int num_select_r = filter_r.size(0);
+    int64_t N = h_parameters.size(0); // number of all gaussians
+    int64_t num_select = filter.size(0); // number of visible gaussians this iter
+    int64_t num_select_r = filter_r.size(0);
 
     cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
 
-    transfer_D_shsgrad_gpu2cpu_kernel_stream_retention2<<<grid_size_D, block_size_D, 0, stream>>>(
+    transfer_D_shsgrad_gpu2cpu_kernel_stream_retention2_64<<<grid_size_D, block_size_D, 0, stream>>>(
         d_parameters.contiguous().data<float>(),
         r_parameters.contiguous().data<float>(),
-        filter_r.contiguous().data<int>(),
-        retention_vec.contiguous().data<int>(),
+        filter_r.contiguous().data<int64_t>(),
+        retention_vec.contiguous().data<int64_t>(),
         num_select_r,
         accum
     );
 
     mark_retention_vec<<<grid_size_D, block_size_D, 0, stream>>>(
-        filter_r.contiguous().data<int>(),
-        retention_vec.contiguous().data<int>(),
+        filter_r.contiguous().data<int64_t>(),
+        retention_vec.contiguous().data<int64_t>(),
         num_select_r
     );
 
-    transfer_H_shsgrad_gpu2cpu_kernel_stream_retention2<<<grid_size_H, block_size_H, 0, stream>>>(
+    transfer_H_shsgrad_gpu2cpu_kernel_stream_retention2_64<<<grid_size_H, block_size_H, 0, stream>>>(
         d_parameters.contiguous().data<float>(),
         h_parameters.contiguous().data<float>(),
-        filter.contiguous().data<int>(),
-        retention_vec.contiguous().data<int>(),
+        filter.contiguous().data<int64_t>(),
+        retention_vec.contiguous().data<int64_t>(),
         num_select,
         accum
     );

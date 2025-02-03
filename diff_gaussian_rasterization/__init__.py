@@ -796,6 +796,10 @@ def send_shs2gpu_stream_retention(
     assert rtnt_indices.is_cuda
     assert param_indices_from_host.is_cuda
     assert param_indices_from_rtnt.is_cuda
+    assert host_indices.dtype == torch.int32
+    assert rtnt_indices.dtype == torch.int32
+    assert param_indices_from_host.dtype == torch.int32
+    assert param_indices_from_rtnt.dtype == torch.int32
     assert d_parameters.shape[0] == host_indices.shape[0] + rtnt_indices.shape[0]
     assert host_indices.shape[0] == param_indices_from_host.shape[0]
     assert rtnt_indices.shape[0] == param_indices_from_rtnt.shape[0]
@@ -830,10 +834,45 @@ def send_shs2gpu_stream_retention2(
     assert r_parameters.is_cuda
     assert filter_next.is_cuda
     assert retention_vec.is_cuda
+    assert filter_next.dtype == torch.int32
+    assert retention_vec.dtype == torch.int32
     assert d_parameters.shape[0] == filter_next.shape[0]
     assert h_parameters.shape[0] == retention_vec.shape[0]
 
     return _C.send_shs2gpu_stream_retention2(
+        d_parameters,
+        h_parameters,
+        r_parameters,
+        filter_next,
+        retention_vec,
+        grid_size_H,
+        block_size_H,
+        grid_size_D,
+        block_size_D
+    )
+
+def send_shs2gpu_stream_retention2_64(
+    d_parameters,
+    h_parameters,
+    r_parameters,
+    filter_next,
+    retention_vec,
+    grid_size_H,
+    block_size_H,
+    grid_size_D,
+    block_size_D
+):
+    assert d_parameters.is_cuda
+    assert h_parameters.is_pinned()
+    assert r_parameters.is_cuda
+    assert filter_next.is_cuda
+    assert retention_vec.is_cuda
+    assert filter_next.dtype == torch.int64
+    assert retention_vec.dtype == torch.int64
+    assert d_parameters.shape[0] == filter_next.shape[0]
+    assert h_parameters.shape[0] == retention_vec.shape[0]
+
+    return _C.send_shs2gpu_stream_retention2_64(
         d_parameters,
         h_parameters,
         r_parameters,
@@ -987,6 +1026,10 @@ def send_shs2cpu_grad_buffer_stream_retention(
     assert rtnt_indices.is_cuda
     assert grad_indices_to_host.is_cuda
     assert grad_indices_to_rtnt.is_cuda
+    assert host_indices.dtype == torch.int32
+    assert rtnt_indices.dtype == torch.int32
+    assert grad_indices_to_host.dtype == torch.int32
+    assert grad_indices_to_rtnt.dtype == torch.int32
     assert d_parameters.shape[0] == host_indices.shape[0] + rtnt_indices.shape[0]
     assert host_indices.shape[0] == grad_indices_to_host.shape[0]
     assert rtnt_indices.shape[0] == grad_indices_to_rtnt.shape[0]
@@ -1006,7 +1049,7 @@ def send_shs2cpu_grad_buffer_stream_retention(
         block_size_D
     )
 
-def send_shs2cpu_grad_buffer_stream_retention2(
+def send_shs2cpu_grad_buffer_stream_retention2_64(
     d_parameters,
     h_parameters,
     r_parameters,
@@ -1025,11 +1068,14 @@ def send_shs2cpu_grad_buffer_stream_retention2(
     assert filter_this.is_cuda
     assert filter_next.is_cuda
     assert retention_vec.is_cuda
+    assert filter_this.dtype == torch.int64
+    assert filter_next.dtype == torch.int64
+    assert retention_vec.dtype == torch.int64
     assert d_parameters.shape[0] == filter_this.shape[0]
     assert h_parameters.shape[0] == retention_vec.shape[0]
     assert r_parameters.shape[0] == filter_next.shape[0]
 
-    return _C.send_shs2cpu_grad_buffer_stream_retention2(
+    return _C.send_shs2cpu_grad_buffer_stream_retention2_64(
         d_parameters,
         h_parameters,
         r_parameters,
