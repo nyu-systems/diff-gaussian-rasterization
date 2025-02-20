@@ -358,8 +358,8 @@ __global__ void transfer_H_shs_cpu2gpu_kernel_stream(
         int row = i / 48;
         int col = i % 48;
 
-        int offset_srce = host_indices[row] * 48 + col;
-        int offset_dest = param_indices_from_host[row] * 48 + col;
+        size_t offset_srce = static_cast<size_t>(host_indices[row]) * 48 + col;
+        size_t offset_dest = static_cast<size_t>(param_indices_from_host[row]) * 48 + col;
 
         d_shs[offset_dest] = h_shs[offset_srce];
     }
@@ -379,8 +379,8 @@ __global__ void transfer_D_shs_cpu2gpu_kernel_stream(
         int row = i / 48;
         int col = i % 48;
 
-        int offset_srce = host_indices[row] * 48 + col;
-        int offset_dest = param_indices_from_rtnt[row] * 48 + col;
+        size_t offset_srce = static_cast<size_t>(host_indices[row]) * 48 + col;
+        size_t offset_dest = static_cast<size_t>(param_indices_from_rtnt[row]) * 48 + col;
 
         d_shs[offset_dest] = r_shs[offset_srce];
     }
@@ -1071,8 +1071,8 @@ __global__ void transfer_H_shsgrad_gpu2cpu_kernel_stream(
         int row = i / 48;
         int col = i % 48;
 
-        int offset_host = host_indices[row] * 48 + col;
-        int offset_grad = grad_indices[row] * 48 + col;
+        size_t offset_host = static_cast<size_t>(host_indices[row]) * 48 + col;
+        size_t offset_grad = static_cast<size_t>(grad_indices[row]) * 48 + col;
 
         if (accum) h_shs[offset_host] += d_shs[offset_grad];
         else h_shs[offset_host] = d_shs[offset_grad];
@@ -1095,8 +1095,8 @@ __global__ void transfer_D_shsgrad_gpu2cpu_kernel_stream(
         int row = i / 48;
         int col = i % 48;
 
-        int offset_rtnt = rtnt_indices[row] * 48 + col;
-        int offset_grad = grad_indices[row] * 48 + col;
+        size_t offset_rtnt = static_cast<size_t>(rtnt_indices[row]) * 48 + col;
+        size_t offset_grad = static_cast<size_t>(grad_indices[row]) * 48 + col;
 
         if (accum) r_shs[offset_rtnt] += d_shs[offset_grad];
         else r_shs[offset_rtnt] = d_shs[offset_grad];
