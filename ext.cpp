@@ -55,4 +55,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("fused_loss", &FusedLossCUDA);
 
   m.def("set_signal", &SetSignal);
+  m.def("map_bit_and_vec", &MapBitAndVec);
+  m.def("generate_hdg", &GenerateHdg);
+  m.def("extract_reset_bitmap", &ExtractResetBitmap);
 }

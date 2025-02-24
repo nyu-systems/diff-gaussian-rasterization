@@ -12,6 +12,7 @@
 #include <math.h>
 #include <torch/extension.h>
 #include <cstdio>
+#include <cmath>
 #include <sstream>
 #include <iostream>
 #include <tuple>
@@ -1074,6 +1075,11 @@ __global__ void transfer_H_shsgrad_gpu2cpu_kernel_stream(
         size_t offset_host = static_cast<size_t>(host_indices[row]) * 48 + col;
         size_t offset_grad = static_cast<size_t>(grad_indices[row]) * 48 + col;
 
+        float grad = d_shs[offset_grad];
+        // if (std::fabs(grad) < 1e-25f){
+        //     if (accum) h_shs[offset_host] += d_shs[offset_grad];
+        //     else h_shs[offset_host] = d_shs[offset_grad];
+        // }
         if (accum) h_shs[offset_host] += d_shs[offset_grad];
         else h_shs[offset_host] = d_shs[offset_grad];
     }
@@ -2087,4 +2093,209 @@ void SetSignal(torch::Tensor& signal_tensor, int microbatch_idx, int signal)
         signal
     );
 
+}
+
+
+template <typename T>
+__global__ void map_row_and_vec_kernel(
+    T *bitmap,
+    uint8_t *bitvec,
+    int total_elements,
+    int bit_offset,
+    uint8_t *outvec
+)
+{
+    int stride = gridDim.x * blockDim.x;
+    
+    for (int i = threadIdx.x + blockIdx.x * blockDim.x; i < total_elements; i += stride)
+    {
+        outvec[i] = (bitmap[i] >> bit_offset) & 1 & bitvec[i];
+    }
+}
+
+void MapBitAndVec(
+    torch::Tensor& bitmap,
+    torch::Tensor& bitvec,
+    int bit_offset, // which bit to extract: lsb=0, msb=63
+    torch::Tensor& outvec
+)
+{
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+    int n_element = bitmap.size(0);
+
+    if (bitmap.dtype() == torch::kInt64) {
+        map_row_and_vec_kernel<int64_t><<<64, 256, 0, stream>>>(
+            reinterpret_cast<int64_t*>(bitmap.contiguous().data_ptr()),
+            reinterpret_cast<uint8_t*>(bitvec.contiguous().data_ptr()),
+            n_element,
+            bit_offset,
+            reinterpret_cast<uint8_t*>(outvec.contiguous().data_ptr())
+        );
+    }
+    else if (bitmap.dtype() == torch::kInt32) {
+        map_row_and_vec_kernel<int><<<64, 256, 0, stream>>>(
+            reinterpret_cast<int*>(bitmap.contiguous().data_ptr()),
+            reinterpret_cast<uint8_t*>(bitvec.contiguous().data_ptr()),
+            n_element,
+            bit_offset,
+            reinterpret_cast<uint8_t*>(outvec.contiguous().data_ptr())
+        );
+    }
+    else if (bitmap.dtype() == torch::kInt16) {
+        map_row_and_vec_kernel<int16_t><<<64, 256, 0, stream>>>(
+            reinterpret_cast<int16_t*>(bitmap.contiguous().data_ptr()),
+            reinterpret_cast<uint8_t*>(bitvec.contiguous().data_ptr()),
+            n_element,
+            bit_offset,
+            reinterpret_cast<uint8_t*>(outvec.contiguous().data_ptr())
+        );
+    }
+    else if (bitmap.dtype() == torch::kInt8) {
+        map_row_and_vec_kernel<int8_t><<<64, 256, 0, stream>>>(
+            reinterpret_cast<int8_t*>(bitmap.contiguous().data_ptr()),
+            reinterpret_cast<uint8_t*>(bitvec.contiguous().data_ptr()),
+            n_element,
+            bit_offset,
+            reinterpret_cast<uint8_t*>(outvec.contiguous().data_ptr())
+        );
+    }
+    else AT_ERROR("`bitmap` must have dtype (int8, int16, int32, int64).");
+}
+
+template <typename T>
+__global__ void generate_hdg_kernel(
+    T *bitmap,
+    int n_col,
+    int this_bit_offset,
+    int next_bit_offset,
+    uint8_t *hdg_vec
+)
+{
+    int stride = gridDim.x * blockDim.x;
+    
+    for (int i = threadIdx.x + blockIdx.x * blockDim.x; i < n_col; i += stride)
+    {
+        uint8_t this_bit = (bitmap[i] >> this_bit_offset) & 1;
+        uint8_t next_bit = (bitmap[i] >> next_bit_offset) & 1;
+
+        hdg_vec[i] = ~this_bit & next_bit;
+        hdg_vec[i + n_col] = this_bit & next_bit;
+        hdg_vec[i + 2 * n_col] = this_bit & ~next_bit;
+    }
+}
+
+void GenerateHdg(
+    torch::Tensor& bitmap,
+    int this_bit_offset,
+    int next_bit_offset,
+    torch::Tensor& hdg_vec
+)
+{
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+    int n_col = bitmap.size(0);
+
+    if (bitmap.dtype() == torch::kInt64) {
+        generate_hdg_kernel<int64_t><<<64, 256, 0, stream>>>(
+            reinterpret_cast<int64_t*>(bitmap.contiguous().data_ptr()),
+            n_col,
+            this_bit_offset,
+            next_bit_offset,
+            reinterpret_cast<uint8_t*>(hdg_vec.contiguous().data_ptr())
+        );
+    }
+    else if (bitmap.dtype() == torch::kInt32) {
+        generate_hdg_kernel<int><<<64, 256, 0, stream>>>(
+            reinterpret_cast<int*>(bitmap.contiguous().data_ptr()),
+            n_col,
+            this_bit_offset,
+            next_bit_offset,
+            reinterpret_cast<uint8_t*>(hdg_vec.contiguous().data_ptr())
+        );
+    }
+    else if (bitmap.dtype() == torch::kInt16) {
+        generate_hdg_kernel<int16_t><<<64, 256, 0, stream>>>(
+            reinterpret_cast<int16_t*>(bitmap.contiguous().data_ptr()),
+            n_col,
+            this_bit_offset,
+            next_bit_offset,
+            reinterpret_cast<uint8_t*>(hdg_vec.contiguous().data_ptr())
+        );
+    }
+    else if (bitmap.dtype() == torch::kInt8) {
+        generate_hdg_kernel<int8_t><<<64, 256, 0, stream>>>(
+            reinterpret_cast<int8_t*>(bitmap.contiguous().data_ptr()),
+            n_col,
+            this_bit_offset,
+            next_bit_offset,
+            reinterpret_cast<uint8_t*>(hdg_vec.contiguous().data_ptr())
+        );
+    }
+    else AT_ERROR("`bitmap` must have dtype (int8, int16, int32, int64).");
+}
+
+template <typename T>
+__global__ void extract_reset_bitmap_kernel(
+    T *reset_col_gathered,
+    int n_col,
+    int bsz,
+    uint8_t *outmap
+)
+{
+    int stride = gridDim.x * blockDim.x;
+    int total_elements = n_col * bsz;
+    
+    for (int i = threadIdx.x + blockIdx.x * blockDim.x; i < total_elements; i += stride)
+    {
+        int bit_offset = i / n_col;
+        int col = i % n_col;
+
+        outmap[i] = (reset_col_gathered[col] >> (bsz - 1 - bit_offset)) & 1;
+    }
+}
+
+void ExtractResetBitmap(
+    torch::Tensor& reset_col_gathered,
+    torch::Tensor& outmap
+)
+{
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+    int n_col = reset_col_gathered.size(0);
+    int bsz = outmap.size(0);
+
+    if (reset_col_gathered.dtype() == torch::kInt64) {
+        extract_reset_bitmap_kernel<int64_t><<<64, 256, 0, stream>>>(
+            reinterpret_cast<int64_t*>(reset_col_gathered.contiguous().data_ptr()),
+            n_col,
+            64,
+            reinterpret_cast<uint8_t*>(outmap.contiguous().data_ptr())
+        );
+    }
+    else if (reset_col_gathered.dtype() == torch::kInt32) {
+        extract_reset_bitmap_kernel<int><<<64, 256, 0, stream>>>(
+            reinterpret_cast<int*>(reset_col_gathered.contiguous().data_ptr()),
+            n_col,
+            32,
+            reinterpret_cast<uint8_t*>(outmap.contiguous().data_ptr())
+        );
+    }
+    else if (reset_col_gathered.dtype() == torch::kInt16) {
+        extract_reset_bitmap_kernel<int16_t><<<64, 256, 0, stream>>>(
+            reinterpret_cast<int16_t*>(reset_col_gathered.contiguous().data_ptr()),
+            n_col,
+            16,
+            reinterpret_cast<uint8_t*>(outmap.contiguous().data_ptr())
+        );
+    }
+    else if (reset_col_gathered.dtype() == torch::kInt8) {
+        extract_reset_bitmap_kernel<int8_t><<<64, 256, 0, stream>>>(
+            reinterpret_cast<int8_t*>(reset_col_gathered.contiguous().data_ptr()),
+            n_col,
+            bsz,
+            reinterpret_cast<uint8_t*>(outmap.contiguous().data_ptr())
+        );
+    }
+    else AT_ERROR("`reset_col_gathered` must have dtype (int8, int16, int32, int64).");
 }

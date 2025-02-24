@@ -405,3 +405,22 @@ torch::Tensor GetLocal2jIdsBoolAdjustMode6CUDA(
 std::tuple<int, int, int> GetBlockXY();
 
 void SetSignal(torch::Tensor& signal_tensor, int microbatch_idx, int signal);
+
+void MapBitAndVec(
+    torch::Tensor& bitmap,
+    torch::Tensor& bitvec,
+    int bit_offset, // which bit to extract: lsb=0, msb=63
+    torch::Tensor& outvec
+);
+
+void GenerateHdg(
+    torch::Tensor& bitmap,
+    int this_bit_offset,
+    int next_bit_offset,
+    torch::Tensor& hdg_vec
+);
+
+void ExtractResetBitmap(
+    torch::Tensor& reset_col_gathered,
+    torch::Tensor& outmap
+);
