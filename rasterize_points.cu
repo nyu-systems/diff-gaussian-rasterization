@@ -2299,3 +2299,74 @@ void ExtractResetBitmap(
     }
     else AT_ERROR("`reset_col_gathered` must have dtype (int8, int16, int32, int64).");
 }
+
+template <typename T>
+__global__ void extract_ffs_kernel(
+    T* input,
+    uint8_t *output,
+    int N
+)
+{
+    int stride = gridDim.x * blockDim.x;
+
+    for (int i = threadIdx.x + blockIdx.x * blockDim.x; i < N; i += stride)
+    {
+        int casted = static_cast<int>(input[i]);
+        output[i] = static_cast<uint8_t>(__ffs(casted));
+    }
+}
+
+__global__ void extract_ffsll_kernel(
+    uint64_t* input,
+    uint8_t *output,
+    int N
+)
+{
+    int stride = gridDim.x * blockDim.x;
+
+    for (int i = threadIdx.x + blockIdx.x * blockDim.x; i < N; i += stride)
+    {
+        int64_t casted = static_cast<int64_t>(input[i]);
+        output[i] = static_cast<uint8_t>(__ffsll(casted));
+    }
+}
+
+void ExtractFFS(
+    torch::Tensor &input,
+    torch::Tensor &output
+)
+{
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+    int N = input.size(0);
+
+    if (input.dtype() == torch::kInt64) {
+        extract_ffsll_kernel<<<64, 256, 0, stream>>>(
+            reinterpret_cast<uint64_t*>(input.contiguous().data_ptr()),
+            reinterpret_cast<uint8_t*>(output.contiguous().data_ptr()),
+            N
+        );
+    }
+    else if (input.dtype() == torch::kInt32) {
+        extract_ffs_kernel<<<64, 256, 0, stream>>>(
+            reinterpret_cast<uint32_t*>(input.contiguous().data_ptr()),
+            reinterpret_cast<uint8_t*>(output.contiguous().data_ptr()),
+            N
+        );
+    }
+    else if (input.dtype() == torch::kInt16) {
+        extract_ffs_kernel<<<64, 256, 0, stream>>>(
+            reinterpret_cast<uint16_t*>(input.contiguous().data_ptr()),
+            reinterpret_cast<uint8_t*>(output.contiguous().data_ptr()),
+            N
+        );
+    }
+    else if (input.dtype() == torch::kInt8) {
+        extract_ffs_kernel<<<64, 256, 0, stream>>>(
+            reinterpret_cast<uint8_t*>(input.contiguous().data_ptr()),
+            reinterpret_cast<uint8_t*>(output.contiguous().data_ptr()),
+            N
+        );
+    }
+    else AT_ERROR("`reset_col_gathered` must have dtype (int8, int16, int32, int64).");
+
+}

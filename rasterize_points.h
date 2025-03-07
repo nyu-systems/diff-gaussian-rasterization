@@ -424,3 +424,8 @@ void ExtractResetBitmap(
     torch::Tensor& reset_col_gathered,
     torch::Tensor& outmap
 );
+
+void ExtractFFS(
+    torch::Tensor &input,
+    torch::Tensor &output
+);

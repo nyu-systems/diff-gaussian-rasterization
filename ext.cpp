@@ -58,4 +58,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("map_bit_and_vec", &MapBitAndVec);
   m.def("generate_hdg", &GenerateHdg);
   m.def("extract_reset_bitmap", &ExtractResetBitmap);
+  m.def("extract_ffs", &ExtractFFS);
 }
