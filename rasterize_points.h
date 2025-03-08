@@ -429,3 +429,16 @@ void ExtractFFS(
     torch::Tensor &input,
     torch::Tensor &output
 );
+
+void ScatterToBit(
+    torch::Tensor& bitmap,
+    torch::Tensor& filter,
+    int bit
+);
+
+void ComputeCntH(
+    torch::Tensor &bitmap,
+    torch::Tensor &tmp_buffer,
+    int grid_size,
+    int blk_size
+);

@@ -2347,21 +2347,21 @@ void ExtractFFS(
         );
     }
     else if (input.dtype() == torch::kInt32) {
-        extract_ffs_kernel<<<64, 256, 0, stream>>>(
+        extract_ffs_kernel<uint32_t><<<64, 256, 0, stream>>>(
             reinterpret_cast<uint32_t*>(input.contiguous().data_ptr()),
             reinterpret_cast<uint8_t*>(output.contiguous().data_ptr()),
             N
         );
     }
     else if (input.dtype() == torch::kInt16) {
-        extract_ffs_kernel<<<64, 256, 0, stream>>>(
+        extract_ffs_kernel<uint16_t><<<64, 256, 0, stream>>>(
             reinterpret_cast<uint16_t*>(input.contiguous().data_ptr()),
             reinterpret_cast<uint8_t*>(output.contiguous().data_ptr()),
             N
         );
     }
     else if (input.dtype() == torch::kInt8) {
-        extract_ffs_kernel<<<64, 256, 0, stream>>>(
+        extract_ffs_kernel<uint8_t><<<64, 256, 0, stream>>>(
             reinterpret_cast<uint8_t*>(input.contiguous().data_ptr()),
             reinterpret_cast<uint8_t*>(output.contiguous().data_ptr()),
             N
@@ -2369,4 +2369,230 @@ void ExtractFFS(
     }
     else AT_ERROR("`reset_col_gathered` must have dtype (int8, int16, int32, int64).");
 
+}
+
+template <typename T>
+__global__ void scatter_to_bit_kernel(
+    T* bitmap,
+    int64_t* filter,
+    int bit,
+    int nnz
+)
+{
+    int stride = gridDim.x * blockDim.x;
+
+    for (int i = threadIdx.x + blockIdx.x * blockDim.x; i < nnz; i += stride)
+    {
+        int64_t offset = filter[i];
+        bitmap[offset] |= (uint64_t(1) << bit); //or 1LL
+    }
+}
+
+void ScatterToBit(
+    torch::Tensor &bitmap,
+    torch::Tensor &filter,
+    int bit
+)
+{
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream(); 
+    int nnz = filter.size(0);
+
+    if (bitmap.dtype() == torch::kInt64) {
+        scatter_to_bit_kernel<uint64_t><<<64, 256, 0, stream>>>(
+            reinterpret_cast<uint64_t*>(bitmap.contiguous().data_ptr()),
+            reinterpret_cast<int64_t*>(filter.contiguous().data_ptr()),
+            bit,
+            nnz
+        );
+    }
+    else if (bitmap.dtype() == torch::kInt32) {
+        scatter_to_bit_kernel<uint32_t><<<64, 256, 0, stream>>>(
+            reinterpret_cast<uint32_t*>(bitmap.contiguous().data_ptr()),
+            reinterpret_cast<int64_t*>(filter.contiguous().data_ptr()),
+            bit,
+            nnz
+        );
+    }
+    else if (bitmap.dtype() == torch::kInt16) {
+        scatter_to_bit_kernel<uint16_t><<<64, 256, 0, stream>>>(
+            reinterpret_cast<uint16_t*>(bitmap.contiguous().data_ptr()),
+            reinterpret_cast<int64_t*>(filter.contiguous().data_ptr()),
+            bit,
+            nnz
+        );
+    }
+    else if (bitmap.dtype() == torch::kInt8) {
+        scatter_to_bit_kernel<uint8_t><<<64, 256, 0, stream>>>(
+            reinterpret_cast<uint8_t*>(bitmap.contiguous().data_ptr()),
+            reinterpret_cast<int64_t*>(filter.contiguous().data_ptr()),
+            bit,
+            nnz
+        );
+    }
+    else AT_ERROR("`reset_col_gathered` must have dtype (int8, int16, int32, int64).");
+}
+
+__global__ void compute_cnt_h_64_kernel(
+    uint64_t* bitmap,
+    int* out_buffer,
+    int N
+)
+{
+    int stride = gridDim.x * blockDim.x;
+    int reducer[63];
+
+    #pragma unroll
+    for (int i = 0; i < 63; i++) reducer[i] = 0;
+
+    for (int i = threadIdx.x + blockIdx.x * blockDim.x; i < N; i += stride)
+    {
+        uint64_t t = bitmap[i];
+        t = __brevll(t); // LSB: first micro batch; MSB: last micro batch.
+        uint64_t overlap = t & (t >> 1);
+        int count = __popcll(overlap);
+
+        for (int j = 0; j < count; j++) {
+            int pos = __ffsll(overlap);
+            reducer[pos - 1] += 1;
+            overlap &= overlap - 1; // Reset lowest set bit
+        }
+    }
+
+    out_buffer = out_buffer + threadIdx.x + blockIdx.x * blockDim.x;
+    #pragma unroll
+    for (int i = 0; i < 63; i++) out_buffer[i * stride] = reducer[i];
+}
+
+__global__ void compute_cnt_h_32_kernel(
+    uint32_t* bitmap,
+    int* out_buffer,
+    int N
+)
+{
+    int stride = gridDim.x * blockDim.x;
+    int reducer[31];
+
+    #pragma unroll
+    for (int i = 0; i < 31; i++) reducer[i] = 0;
+
+    for (int i = threadIdx.x + blockIdx.x * blockDim.x; i < N; i += stride)
+    {
+        uint32_t t = bitmap[i];
+        t = __brev(t); // LSB: first micro batch; MSB: last micro batch.
+        uint32_t overlap = t & (t >> 1);
+        int count = __popc(overlap);
+
+        for (int j = 0; j < count; j++) {
+            int pos = __ffs(overlap);
+            reducer[pos - 1] += 1;
+            overlap &= overlap - 1; // Reset lowest set bit
+        }
+    }
+
+    out_buffer = out_buffer + threadIdx.x + blockIdx.x * blockDim.x;
+    #pragma unroll
+    for (int i = 0; i < 31; i++) out_buffer[i * stride] = reducer[i];
+}
+
+__global__ void compute_cnt_h_16_kernel(
+    uint16_t* bitmap,
+    int* out_buffer,
+    int N
+)
+{
+    int stride = gridDim.x * blockDim.x;
+    int reducer[15];
+
+    #pragma unroll
+    for (int i = 0; i < 15; i++) reducer[i] = 0;
+
+    for (int i = threadIdx.x + blockIdx.x * blockDim.x; i < N; i += stride)
+    {
+        uint32_t t = static_cast<uint32_t>(bitmap[i]);
+        t = __brev(t) >> 16; // LSB: first micro batch; MSB: last micro batch.
+        uint32_t overlap = t & (t >> 1);
+        int count = __popc(overlap);
+
+        for (int j = 0; j < count; j++) {
+            int pos = __ffs(overlap);
+            reducer[pos - 1] += 1;
+            overlap &= overlap - 1; // Reset lowest set bit
+        }
+    }
+
+    out_buffer = out_buffer + threadIdx.x + blockIdx.x * blockDim.x;
+    #pragma unroll
+    for (int i = 0; i < 15; i++) out_buffer[i * stride] = reducer[i];
+}
+
+__global__ void compute_cnt_h_8_kernel(
+    uint8_t* bitmap,
+    int* out_buffer,
+    int N
+)
+{
+    int stride = gridDim.x * blockDim.x;
+    int reducer[7];
+
+    #pragma unroll
+    for (int i = 0; i < 7; i++) reducer[i] = 0;
+
+    for (int i = threadIdx.x + blockIdx.x * blockDim.x; i < N; i += stride)
+    {
+        uint32_t t = static_cast<uint32_t>(bitmap[i]);
+        t = __brev(t) >> 24; // LSB: first micro batch; MSB: last micro batch.
+        uint32_t overlap = t & (t >> 1);
+        int count = __popc(overlap);
+
+        for (int j = 0; j < count; j++) {
+            int pos = __ffs(overlap);
+            reducer[pos - 1] += 1;
+            overlap &= overlap - 1; // Reset lowest set bit
+        }
+    }
+
+    out_buffer = out_buffer + threadIdx.x + blockIdx.x * blockDim.x;
+    #pragma unroll
+    for (int i = 0; i < 7; i++) out_buffer[i * stride] = reducer[i];
+}
+
+void ComputeCntH(
+    torch::Tensor &bitmap,
+    torch::Tensor &tmp_buffer,
+    int grid_size,
+    int blk_size
+)
+{
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream(); 
+    int N = bitmap.size(0);
+
+    if (bitmap.dtype() == torch::kInt64) {
+        compute_cnt_h_64_kernel<<<grid_size, blk_size, 0, stream>>>(
+            reinterpret_cast<uint64_t*>(bitmap.contiguous().data_ptr()),
+            reinterpret_cast<int*>(tmp_buffer.contiguous().data_ptr()),
+            N
+        );
+    }
+    else if (bitmap.dtype() == torch::kInt32) {
+        compute_cnt_h_32_kernel<<<grid_size, blk_size, 0, stream>>>(
+            reinterpret_cast<uint32_t*>(bitmap.contiguous().data_ptr()),
+            reinterpret_cast<int*>(tmp_buffer.contiguous().data_ptr()),
+            N
+        );
+    }
+    else if (bitmap.dtype() == torch::kInt16) {
+        compute_cnt_h_16_kernel<<<grid_size, blk_size, 0, stream>>>(
+            reinterpret_cast<uint16_t*>(bitmap.contiguous().data_ptr()),
+            reinterpret_cast<int*>(tmp_buffer.contiguous().data_ptr()),
+            N
+        );
+    }
+    else if (bitmap.dtype() == torch::kInt8) {
+        compute_cnt_h_8_kernel<<<grid_size, blk_size, 0, stream>>>(
+            reinterpret_cast<uint8_t*>(bitmap.contiguous().data_ptr()),
+            reinterpret_cast<int*>(tmp_buffer.contiguous().data_ptr()),
+            N
+        );
+    }
+    else AT_ERROR("`reset_col_gathered` must have dtype (int8, int16, int32, int64).");
 }
