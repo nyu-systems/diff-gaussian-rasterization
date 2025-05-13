@@ -442,3 +442,15 @@ void ComputeCntH(
     int grid_size,
     int blk_size
 );
+
+void ComputePopcnt(
+    torch::Tensor &bitmap,
+    torch::Tensor &tmp_buffer
+);
+
+void ComputeCntC(
+    torch::Tensor &bitmap,
+    torch::Tensor &tmp_buffer,
+    int grid_size,
+    int blk_size
+);

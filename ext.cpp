@@ -61,4 +61,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("extract_ffs", &ExtractFFS);
   m.def("scatter_to_bit", &ScatterToBit);
   m.def("compute_cnt_h", &ComputeCntH);
+  m.def("compute_popcnt", &ComputePopcnt);
+  m.def("compute_cnt_c", &ComputeCntC);
 }

@@ -2596,3 +2596,170 @@ void ComputeCntH(
     }
     else AT_ERROR("`reset_col_gathered` must have dtype (int8, int16, int32, int64).");
 }
+
+__global__ void compute_popcnt_64_kernel(
+    uint64_t* bitmap,
+    int* out_buffer,
+    int N
+)
+{
+    int stride = gridDim.x * blockDim.x;
+
+    for (int i = threadIdx.x + blockIdx.x * blockDim.x; i < N; i += stride)
+    {
+        uint64_t t = bitmap[i];
+        out_buffer[i] = __popcll(t);
+    }
+}
+
+__global__ void compute_popcnt_16_kernel(
+    uint16_t* bitmap,
+    int* out_buffer,
+    int N
+)
+{
+    int stride = gridDim.x * blockDim.x;
+
+    for (int i = threadIdx.x + blockIdx.x * blockDim.x; i < N; i += stride)
+    {
+        uint32_t t = static_cast<uint32_t>(bitmap[i]);
+        out_buffer[i] = __popc(t);
+    }
+}
+
+void ComputePopcnt(
+    torch::Tensor &bitmap,
+    torch::Tensor &tmp_buffer
+)
+{
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream(); 
+    int N = bitmap.size(0);
+
+    if (bitmap.dtype() == torch::kInt64) {
+        compute_popcnt_64_kernel<<<64, 256, 0, stream>>>(
+            reinterpret_cast<uint64_t*>(bitmap.contiguous().data_ptr()),
+            reinterpret_cast<int*>(tmp_buffer.contiguous().data_ptr()),
+            N
+        );
+    }
+    // else if (bitmap.dtype() == torch::kInt32) {
+    //     compute_cnt_h_32_kernel<<<grid_size, blk_size, 0, stream>>>(
+    //         reinterpret_cast<uint32_t*>(bitmap.contiguous().data_ptr()),
+    //         reinterpret_cast<int*>(tmp_buffer.contiguous().data_ptr()),
+    //         N
+    //     );
+    // }
+    else if (bitmap.dtype() == torch::kInt16) {
+        compute_popcnt_16_kernel<<<64, 256, 0, stream>>>(
+            reinterpret_cast<uint16_t*>(bitmap.contiguous().data_ptr()),
+            reinterpret_cast<int*>(tmp_buffer.contiguous().data_ptr()),
+            N
+        );
+    }
+    // else if (bitmap.dtype() == torch::kInt8) {
+    //     compute_cnt_h_8_kernel<<<grid_size, blk_size, 0, stream>>>(
+    //         reinterpret_cast<uint8_t*>(bitmap.contiguous().data_ptr()),
+    //         reinterpret_cast<int*>(tmp_buffer.contiguous().data_ptr()),
+    //         N
+    //     );
+    // }
+    else AT_ERROR("`bitmap` must have dtype (int16, int64).");
+}
+
+__global__ void compute_cnt_c_64_kernel(
+    uint64_t* bitmap,
+    int* out_buffer,
+    int N
+)
+{
+    int stride = gridDim.x * blockDim.x;
+    int reducer[64];
+
+    #pragma unroll
+    for (int i = 0; i < 64; i++) reducer[i] = 0;
+
+    for (int i = threadIdx.x + blockIdx.x * blockDim.x; i < N; i += stride)
+    {
+        uint64_t t = bitmap[i];
+        int count = __popcll(t);
+        for (int j = 0; j < count; j++) {
+            int pos = __ffsll(t);
+            reducer[64 - pos] += 1;
+            t &= t - 1;
+        }
+    }
+
+    out_buffer = out_buffer + threadIdx.x + blockIdx.x * blockDim.x;
+    #pragma unroll
+    for (int i = 0; i < 64; i++) out_buffer[i * stride] = reducer[i];
+}
+
+__global__ void compute_cnt_c_16_kernel(
+    uint16_t* bitmap,
+    int* out_buffer,
+    int N
+)
+{
+    int stride = gridDim.x * blockDim.x;
+    int reducer[16];
+
+    #pragma unroll
+    for (int i = 0; i < 16; i++) reducer[i] = 0;
+
+    for (int i = threadIdx.x + blockIdx.x * blockDim.x; i < N; i += stride)
+    {
+        uint32_t t = static_cast<uint32_t>(bitmap[i]);
+        int count = __popc(t);
+
+        for (int j = 0; j < count; j++) {
+            int pos = __ffs(t);
+            reducer[16 - pos] += 1;
+            t &= t - 1; // Reset lowest set bit
+        }
+    }
+
+    out_buffer = out_buffer + threadIdx.x + blockIdx.x * blockDim.x;
+    #pragma unroll
+    for (int i = 0; i < 16; i++) out_buffer[i * stride] = reducer[i];
+}
+
+void ComputeCntC(
+    torch::Tensor &bitmap,
+    torch::Tensor &tmp_buffer,
+    int grid_size,
+    int blk_size
+)
+{
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream(); 
+    int N = bitmap.size(0);
+
+    if (bitmap.dtype() == torch::kInt64) {
+        compute_cnt_c_64_kernel<<<grid_size, blk_size, 0, stream>>>(
+            reinterpret_cast<uint64_t*>(bitmap.contiguous().data_ptr()),
+            reinterpret_cast<int*>(tmp_buffer.contiguous().data_ptr()),
+            N
+        );
+    }
+    // else if (bitmap.dtype() == torch::kInt32) {
+    //     compute_cnt_h_32_kernel<<<grid_size, blk_size, 0, stream>>>(
+    //         reinterpret_cast<uint32_t*>(bitmap.contiguous().data_ptr()),
+    //         reinterpret_cast<int*>(tmp_buffer.contiguous().data_ptr()),
+    //         N
+    //     );
+    // }
+    else if (bitmap.dtype() == torch::kInt16) {
+        compute_cnt_c_16_kernel<<<grid_size, blk_size, 0, stream>>>(
+            reinterpret_cast<uint16_t*>(bitmap.contiguous().data_ptr()),
+            reinterpret_cast<int*>(tmp_buffer.contiguous().data_ptr()),
+            N
+        );
+    }
+    // else if (bitmap.dtype() == torch::kInt8) {
+    //     compute_cnt_h_8_kernel<<<grid_size, blk_size, 0, stream>>>(
+    //         reinterpret_cast<uint8_t*>(bitmap.contiguous().data_ptr()),
+    //         reinterpret_cast<int*>(tmp_buffer.contiguous().data_ptr()),
+    //         N
+    //     );
+    // }
+    else AT_ERROR("`compute_cnt_c` must have dtype (int16, int64).");
+}
