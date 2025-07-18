@@ -2556,6 +2556,37 @@ __global__ void compute_cnt_h_8_kernel(
     for (int i = 0; i < 7; i++) out_buffer[i * stride] = reducer[i];
 }
 
+__global__ void compute_cnt_h_4_kernel(
+    uint8_t* bitmap,
+    int* out_buffer,
+    int N
+)
+{
+    int stride = gridDim.x * blockDim.x;
+    int reducer[3];
+
+    #pragma unroll
+    for (int i = 0; i < 3; i++) reducer[i] = 0;
+
+    for (int i = threadIdx.x + blockIdx.x * blockDim.x; i < N; i += stride)
+    {
+        uint32_t t = static_cast<uint32_t>(bitmap[i]);
+        t = __brev(t) >> 28; // LSB: first micro batch; MSB: last micro batch.
+        uint32_t overlap = t & (t >> 1);
+        int count = __popc(overlap);
+
+        for (int j = 0; j < count; j++) {
+            int pos = __ffs(overlap);
+            reducer[pos - 1] += 1;
+            overlap &= overlap - 1; // Reset lowest set bit
+        }
+    }
+
+    out_buffer = out_buffer + threadIdx.x + blockIdx.x * blockDim.x;
+    #pragma unroll
+    for (int i = 0; i < 3; i++) out_buffer[i * stride] = reducer[i];
+}
+
 void ComputeCntH(
     torch::Tensor &bitmap,
     torch::Tensor &tmp_buffer,
@@ -2565,6 +2596,7 @@ void ComputeCntH(
 {
     cudaStream_t stream = at::cuda::getCurrentCUDAStream(); 
     int N = bitmap.size(0);
+    int bsz = tmp_buffer.size(0) + 1;
 
     if (bitmap.dtype() == torch::kInt64) {
         compute_cnt_h_64_kernel<<<grid_size, blk_size, 0, stream>>>(
@@ -2588,11 +2620,20 @@ void ComputeCntH(
         );
     }
     else if (bitmap.dtype() == torch::kInt8) {
-        compute_cnt_h_8_kernel<<<grid_size, blk_size, 0, stream>>>(
-            reinterpret_cast<uint8_t*>(bitmap.contiguous().data_ptr()),
-            reinterpret_cast<int*>(tmp_buffer.contiguous().data_ptr()),
-            N
-        );
+        if (bsz == 4) {
+            compute_cnt_h_4_kernel<<<grid_size, blk_size, 0, stream>>>(
+                reinterpret_cast<uint8_t*>(bitmap.contiguous().data_ptr()),
+                reinterpret_cast<int*>(tmp_buffer.contiguous().data_ptr()),
+                N
+            );
+        }
+        else {
+            compute_cnt_h_8_kernel<<<grid_size, blk_size, 0, stream>>>(
+                reinterpret_cast<uint8_t*>(bitmap.contiguous().data_ptr()),
+                reinterpret_cast<int*>(tmp_buffer.contiguous().data_ptr()),
+                N
+            );
+        }
     }
     else AT_ERROR("`reset_col_gathered` must have dtype (int8, int16, int32, int64).");
 }
